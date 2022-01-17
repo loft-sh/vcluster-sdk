@@ -1,15 +1,12 @@
 package syncers
 
 import (
-	"fmt"
-	"github.com/FabianKramm/vcluster/pkg/constants"
 	examplev1 "github.com/loft-sh/vcluster-example/apis/v1"
 	"github.com/loft-sh/vcluster-sdk/plugin"
 	"github.com/loft-sh/vcluster-sdk/syncer"
-	"github.com/loft-sh/vcluster-sdk/syncer/"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/runtime"
+	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
+	"github.com/loft-sh/vcluster-sdk/syncer/translator"
+	"k8s.io/apimachinery/pkg/api/equality"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -19,58 +16,47 @@ func init() {
 	_ = examplev1.AddToScheme(plugin.Scheme)
 }
 
-func NewCarSyncer(ctx *context.SyncContext) (syncer.Object, error) {
-	return &configMapSyncer{
-		NamespacedTranslator: translator.NewNamespacedTranslator(ctx, "configmap", &corev1.ConfigMap{}),
-	}, nil
+func NewCarSyncer(ctx *synccontext.RegisterContext) syncer.Object {
+	return &carSyncer{
+		NamespacedTranslator: translator.NewNamespacedTranslator(ctx, "car", &examplev1.Car{}),
+	}
 }
 
 type carSyncer struct {
 	translator.NamespacedTranslator
 }
 
-func (s *configMapSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
-	createNeeded, err := s.isConfigMapUsed(ctx, vObj)
-	if err != nil {
-		return ctrl.Result{}, err
-	} else if !createNeeded {
-		return ctrl.Result{}, nil
-	}
-
-	return s.SyncDownCreate(ctx, vObj, s.translate(vObj.(*corev1.ConfigMap)))
+func (s *carSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+	return s.SyncDownCreate(ctx, vObj, s.TranslateMetadata(vObj).(*examplev1.Car))
 }
 
-func (s *configMapSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
-	used, err := s.isConfigMapUsed(ctx, vObj)
-	if err != nil {
-		return ctrl.Result{}, err
-	} else if !used {
-		pConfigMap, _ := meta.Accessor(pObj)
-		ctx.Log.Infof("delete physical config map %s/%s, because it is not used anymore", pConfigMap.GetNamespace(), pConfigMap.GetName())
-		err = ctx.PhysicalClient.Delete(ctx.Context, pObj)
-		if err != nil {
-			ctx.Log.Infof("error deleting physical object %s/%s in physical cluster: %v", pConfigMap.GetNamespace(), pConfigMap.GetName(), err)
-			return ctrl.Result{}, err
-		}
-
-		return ctrl.Result{}, nil
-	}
-
-	// did the configmap change?
-	return s.SyncDownUpdate(ctx, vObj, s.translateUpdate(pObj.(*corev1.ConfigMap), vObj.(*corev1.ConfigMap)))
+func (s *carSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
+	return s.SyncDownUpdate(ctx, vObj, s.translateUpdate(pObj.(*examplev1.Car), vObj.(*examplev1.Car)))
 }
 
-func (s *configMapSyncer) isConfigMapUsed(ctx *synccontext.SyncContext, vObj runtime.Object) (bool, error) {
-	configMap, ok := vObj.(*corev1.ConfigMap)
-	if !ok || configMap == nil {
-		return false, fmt.Errorf("%#v is not a config map", vObj)
+func (s *carSyncer) translateUpdate(pObj, vObj *examplev1.Car) *examplev1.Car {
+	var updated *examplev1.Car
+
+	// check annotations & labels
+	changed, updatedAnnotations, updatedLabels := s.TranslateMetadataUpdate(vObj, pObj)
+	if changed {
+		updated = newIfNil(updated, pObj)
+		updated.Labels = updatedLabels
+		updated.Annotations = updatedAnnotations
 	}
 
-	podList := &corev1.PodList{}
-	err := ctx.VirtualClient.List(context.TODO(), podList, client.MatchingFields{constants.IndexByConfigMap: configMap.Namespace + "/" + configMap.Name})
-	if err != nil {
-		return false, err
+	// check spec
+	if !equality.Semantic.DeepEqual(vObj.Spec, pObj.Spec) {
+		updated = newIfNil(updated, pObj)
+		updated.Spec = vObj.Spec
 	}
 
-	return len(podList.Items) > 0, nil
+	return updated
+}
+
+func newIfNil(updated *examplev1.Car, pObj *examplev1.Car) *examplev1.Car {
+	if updated == nil {
+		return pObj.DeepCopy()
+	}
+	return updated
 }
