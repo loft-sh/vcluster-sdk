@@ -1,39 +1,49 @@
 package syncer
 
 import (
-	"github.com/loft-sh/vcluster-sdk/log"
+	"github.com/loft-sh/vcluster-sdk/syncer/context"
+	"github.com/loft-sh/vcluster-sdk/syncer/translator"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Object is the base for syncers and returns the typed object that should get acted on.
 type Object interface {
-	New() client.Object
+	Name() string
+	Resource() client.Object
 }
 
-// Syncer is the main implementation, which handles syncing objects between the host cluster
-// and virtual cluster.
 type Syncer interface {
 	Object
-	Translator
+	translator.NameTranslator
 
-	Forward(ctx Context, vObj client.Object, log log.Logger) (ctrl.Result, error)
-	Update(ctx Context, pObj client.Object, vObj client.Object, log log.Logger) (ctrl.Result, error)
+	SyncDown(ctx *context.SyncContext, vObj client.Object) (ctrl.Result, error)
+	Sync(ctx *context.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error)
 }
 
-type BackwardSyncer interface {
-	Backward(ctx Context, pObj client.Object, log log.Logger) (ctrl.Result, error)
+type UpSyncer interface {
+	SyncUp(ctx *context.SyncContext, pObj client.Object) (ctrl.Result, error)
 }
 
 type FakeSyncer interface {
 	Object
 
-	Create(ctx Context, req types.NamespacedName, log log.Logger) (ctrl.Result, error)
-	Update(ctx Context, vObj client.Object, log log.Logger) (ctrl.Result, error)
+	FakeSyncUp(ctx *context.SyncContext, req types.NamespacedName) (ctrl.Result, error)
+	FakeSync(ctx *context.SyncContext, vObj client.Object) (ctrl.Result, error)
 }
 
 type Starter interface {
-	ReconcileStart(ctx Context, req ctrl.Request) (bool, error)
+	ReconcileStart(ctx *context.SyncContext, req ctrl.Request) (bool, error)
 	ReconcileEnd()
+}
+
+// IndicesRegisterer registers additional indices for the controller
+type IndicesRegisterer interface {
+	RegisterIndices(ctx *context.RegisterContext) error
+}
+
+// ControllerModifier is used to modify the created controller for the syncer
+type ControllerModifier interface {
+	ModifyController(ctx *context.RegisterContext, builder *builder.Builder) (*builder.Builder, error)
 }
