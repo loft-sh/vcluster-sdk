@@ -14,15 +14,32 @@ import (
 // interact with the virtual and physical cluster after the
 // controller has been started.
 type SyncContext struct {
+	// Context is the golang context used to create the managers
 	Context context.Context
-	Log     log.Logger
 
+	// Log is a prefixed log with the syncer name
+	Log log.Logger
+
+	// TargetNamespace is the namespace in the host cluster where
+	// vcluster should sync namespaced scope objects to
 	TargetNamespace string
-	PhysicalClient  client.Client
 
+	// PhysicalClient is a cached client that can be used to retrieve
+	// and modify objects in the target namespace as well as cluster
+	// scoped objects.
+	PhysicalClient client.Client
+
+	// VirtualClient is a cached client that can be used to retrieve
+	// and modify objects in the virtual backing cluster.
 	VirtualClient client.Client
 
-	CurrentNamespace       string
+	// CurrentNamespace is the namespace vcluster including this plugin
+	// is currently running in.
+	CurrentNamespace string
+
+	// CurrentNamespaceClient is a cached client that can be used to retrieve
+	// and modify objects in the current namespace where vcluster is running
+	// in. Should not be used to sync virtual cluster objects.
 	CurrentNamespaceClient client.Client
 }
 
@@ -30,22 +47,44 @@ type SyncContext struct {
 // indices or modify the syncer controller and provides direct
 // access to the underlying controller runtime managers.
 type RegisterContext struct {
-	Context          context.Context
+	// Context is the golang context used to create the managers
+	Context context.Context
+
+	// EventBroadcaster can be used to create custom event recorders
 	EventBroadcaster record.EventBroadcaster
 
+	// Options holds the vcluster flags that were used to start the vcluster
 	Options *VirtualClusterOptions
 
-	TargetNamespace        string
-	CurrentNamespace       string
+	// TargetNamespace is the namespace in the host cluster where
+	// vcluster should sync namespaced scope objects to
+	TargetNamespace string
+
+	// CurrentNamespace is the namespace vcluster including this plugin
+	// is currently running in.
+	CurrentNamespace string
+
+	// CurrentNamespaceClient is a cached client that can be used to retrieve
+	// and modify objects in the current namespace where vcluster is running
+	// in. Should not be used to sync virtual cluster objects.
 	CurrentNamespaceClient client.Client
 
-	VirtualManager  ctrl.Manager
+	// VirtualManager is the controller runtime manager connected directly to the
+	// backing virtual cluster, such as k0s, k3s or vanilla k8s.
+	VirtualManager ctrl.Manager
+
+	// PhysicalManager is the controller runtime manager connected directly to the
+	// host cluster namespace where vcluster will sync to.
 	PhysicalManager ctrl.Manager
 
+	// SyncerConfig can be used to perform requests directly to the vcluster syncer
+	// as other applications outside or inside vcluster would do. This client differs from
+	// virtual and physical manager, as these are either connecting to the host or backing
+	// virtual cluster directly.
 	SyncerConfig clientcmd.ClientConfig
 }
 
-// VirtualClusterOptions holds the vcluster flags
+// VirtualClusterOptions holds the vcluster flags that were used to start the vcluster
 type VirtualClusterOptions struct {
 	Controllers string `json:"controllers,omitempty"`
 
