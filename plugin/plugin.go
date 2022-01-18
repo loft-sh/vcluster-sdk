@@ -40,7 +40,7 @@ type Manager interface {
 
 	// Register makes sure the syncer will be executed as soon as start
 	// is run.
-	Register(syncer syncer.Object) error
+	Register(syncer syncer.Base) error
 
 	// Start runs all the registered syncers and will block. It only executes
 	// the functionality if the current vcluster pod is the current leader and
@@ -65,14 +65,14 @@ func InitWithOptions(name string, opts Options) (*synccontext.RegisterContext, e
 	return defaultManager.InitWithOptions(name, opts)
 }
 
-func MustRegister(syncer syncer.Object) {
+func MustRegister(syncer syncer.Base) {
 	err := defaultManager.Register(syncer)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func Register(syncer syncer.Object) error {
+func Register(syncer syncer.Base) error {
 	return defaultManager.Register(syncer)
 }
 
@@ -91,7 +91,7 @@ type manager struct {
 	guard       sync.Mutex
 	initialized bool
 	started     bool
-	syncers     []syncer.Object
+	syncers     []syncer.Base
 
 	address string
 	context *synccontext.RegisterContext
@@ -222,7 +222,7 @@ func (m *manager) InitWithOptions(name string, opts Options) (*synccontext.Regis
 	return m.context, nil
 }
 
-func (m *manager) Register(syncer syncer.Object) error {
+func (m *manager) Register(syncer syncer.Base) error {
 	m.guard.Lock()
 	defer m.guard.Unlock()
 	if m.started {
@@ -329,15 +329,15 @@ func (m *manager) start() error {
 			if err != nil {
 				return errors.Wrapf(err, "start %s syncer", v.Name())
 			}
-		} else {
-			// real syncer?
-			realSyncer, ok := v.(syncer.Syncer)
-			if ok {
-				log.Infof("Start syncer %s", realSyncer.Name())
-				err = syncer.RegisterSyncer(m.context, realSyncer)
-				if err != nil {
-					return errors.Wrapf(err, "start %s syncer", v.Name())
-				}
+		}
+
+		// real syncer?
+		realSyncer, ok := v.(syncer.Syncer)
+		if ok {
+			log.Infof("Start syncer %s", realSyncer.Name())
+			err = syncer.RegisterSyncer(m.context, realSyncer)
+			if err != nil {
+				return errors.Wrapf(err, "start %s syncer", v.Name())
 			}
 		}
 	}
