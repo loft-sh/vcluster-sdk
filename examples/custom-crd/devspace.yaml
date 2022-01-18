@@ -16,7 +16,7 @@ images:
 hooks:
   - name: Apply Car Manifests
     events: ["after:deploy"]
-    command: kubectl apply -f manifests
+    command: kubectl apply -f manifests/crds.yaml
 deployments:
   - name: vcluster
     helm:

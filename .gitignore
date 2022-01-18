@@ -1,3 +1,4 @@
 .idea/
 examples/**/vendor/
+examples/**/test/
 .devspace/
