@@ -6,6 +6,7 @@ import (
 	"github.com/loft-sh/vcluster-sdk/syncer"
 	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
 	"github.com/loft-sh/vcluster-sdk/syncer/translator"
+	"github.com/loft-sh/vcluster-sdk/translate"
 	"k8s.io/apimachinery/pkg/api/equality"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,6 +25,12 @@ func NewCarSyncer(ctx *synccontext.RegisterContext) syncer.Object {
 
 type carSyncer struct {
 	translator.NamespacedTranslator
+}
+
+var _ syncer.Initializer = &carSyncer{}
+
+func (s *carSyncer) Init(ctx *synccontext.RegisterContext) error {
+	return translate.EnsureCRDFromPhysicalCluster(ctx.Context, ctx.PhysicalManager.GetConfig(), ctx.VirtualManager.GetConfig(), examplev1.GroupVersion.WithKind("Car"))
 }
 
 func (s *carSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {

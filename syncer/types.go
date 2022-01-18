@@ -47,3 +47,8 @@ type IndicesRegisterer interface {
 type ControllerModifier interface {
 	ModifyController(ctx *context.RegisterContext, builder *builder.Builder) (*builder.Builder, error)
 }
+
+// Initializer is used to create and update the prerquisites of the syncer before the controller is started
+type Initializer interface {
+	Init(registerContext *context.RegisterContext) error
+}

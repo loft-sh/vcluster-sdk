@@ -5,7 +5,6 @@ import (
 	"github.com/loft-sh/vcluster-sdk/log"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -49,9 +48,6 @@ type SyncContext struct {
 type RegisterContext struct {
 	// Context is the golang context used to create the managers
 	Context context.Context
-
-	// EventBroadcaster can be used to create custom event recorders
-	EventBroadcaster record.EventBroadcaster
 
 	// Options holds the vcluster flags that were used to start the vcluster
 	Options *VirtualClusterOptions

@@ -12,10 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
-	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -173,7 +170,6 @@ func (m *manager) CreateContext(opts Options) (*synccontext.RegisterContext, err
 
 	m.context = &synccontext.RegisterContext{
 		Context:                context.Background(),
-		EventBroadcaster:       record.NewBroadcaster(),
 		Options:                virtualClusterOptions,
 		TargetNamespace:        pluginContext.TargetNamespace,
 		CurrentNamespace:       pluginContext.CurrentNamespace,
@@ -244,6 +240,15 @@ func (m *manager) start() error {
 
 	log.Infof("Starting syncers...")
 	for _, s := range m.syncers {
+		initializer, ok := s.(syncer.Initializer)
+		if ok {
+			err := initializer.Init(m.context)
+			if err != nil {
+				return errors.Wrapf(err, "init syncer %s", s.Name())
+			}
+		}
+	}
+	for _, s := range m.syncers {
 		indexRegisterer, ok := s.(syncer.IndicesRegisterer)
 		if ok {
 			err := indexRegisterer.RegisterIndices(m.context)
@@ -272,9 +277,6 @@ func (m *manager) start() error {
 	// Wait for caches to be synced
 	m.context.PhysicalManager.GetCache().WaitForCacheSync(m.context.Context)
 	m.context.VirtualManager.GetCache().WaitForCacheSync(m.context.Context)
-
-	// start event broadcaster
-	m.context.EventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubernetes.NewForConfigOrDie(m.context.VirtualManager.GetConfig()).CoreV1().Events("")})
 
 	// start syncers
 	for _, v := range m.syncers {

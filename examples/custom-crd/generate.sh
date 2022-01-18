@@ -14,6 +14,3 @@ go run gen/main.go > manifests/crds.yaml
 
 echo "Update vendor"
 go mod vendor
-
-rm -fr "vendor/github.com/loft-sh/vcluster-sdk"
-ln -s "../../../../../" "vendor/github.com/loft-sh/vcluster-sdk"

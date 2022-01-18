@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +42,7 @@ func NewNamespacedTranslator(ctx *context.RegisterContext, name string, obj clie
 		virtualClient: ctx.VirtualManager.GetClient(),
 		obj:           obj,
 
-		eventRecorder: ctx.EventBroadcaster.NewRecorder(ctx.PhysicalManager.GetScheme(), corev1.EventSource{Component: name + "-syncer"}),
+		eventRecorder: ctx.VirtualManager.GetEventRecorderFor(name + "-syncer"),
 	}
 }
 
