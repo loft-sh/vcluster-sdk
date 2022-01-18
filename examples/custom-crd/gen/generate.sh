@@ -2,6 +2,7 @@
 #
 # Make sure to install deep copy gen before
 # go install k8s.io/code-generator/cmd/deepcopy-gen@latest
+cd ..
 
 echo "Generate apis ..."
 deepcopy-gen --input-dirs github.com/loft-sh/vcluster-example/apis/... -o ./ --go-header-file ../../hack/boilerplate.txt  -O zz_generated.deepcopy

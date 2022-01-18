@@ -349,6 +349,8 @@ github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de/go.mod h1:zAbeS9
 github.com/lithammer/dedent v1.1.0/go.mod h1:jrXYCQtgg0nJiN+StA2KgR7w6CiQNv9Fd/Z9BP0jIOc=
 github.com/loft-sh/vcluster-sdk v0.0.0-20220118151633-18b083294b9f h1:BkiceXp3onucC2lNHbGhrmxMOCCA/Dm2/c3u6a2aw/4=
 github.com/loft-sh/vcluster-sdk v0.0.0-20220118151633-18b083294b9f/go.mod h1:Uw9cy6LIeeZikiUVAsuK8MyRe1I6lX9xLQzuWahs654=
+github.com/loft-sh/vcluster-sdk v0.0.0-20220118161729-753cae83d6cd h1:Zy14WionCw/fdNOrwYgWrynjZdJpsSP1nlI/THW8yqU=
+github.com/loft-sh/vcluster-sdk v0.0.0-20220118161729-753cae83d6cd/go.mod h1:Uw9cy6LIeeZikiUVAsuK8MyRe1I6lX9xLQzuWahs654=
 github.com/magiconair/properties v1.8.0/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/magiconair/properties v1.8.1/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/magiconair/properties v1.8.5/go.mod h1:y3VJvCyxH9uVvJTWEGAELF3aiYNyPKd5NZ3oSwXrF60=
