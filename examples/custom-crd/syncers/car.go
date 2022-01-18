@@ -17,7 +17,7 @@ func init() {
 	_ = examplev1.AddToScheme(plugin.Scheme)
 }
 
-func NewCarSyncer(ctx *synccontext.RegisterContext) syncer.Object {
+func NewCarSyncer(ctx *synccontext.RegisterContext) syncer.Base {
 	return &carSyncer{
 		NamespacedTranslator: translator.NewNamespacedTranslator(ctx, "car", &examplev1.Car{}),
 	}

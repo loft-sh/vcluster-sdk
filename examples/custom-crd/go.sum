@@ -351,6 +351,8 @@ github.com/loft-sh/vcluster-sdk v0.0.0-20220118151633-18b083294b9f h1:BkiceXp3on
 github.com/loft-sh/vcluster-sdk v0.0.0-20220118151633-18b083294b9f/go.mod h1:Uw9cy6LIeeZikiUVAsuK8MyRe1I6lX9xLQzuWahs654=
 github.com/loft-sh/vcluster-sdk v0.0.0-20220118161729-753cae83d6cd h1:Zy14WionCw/fdNOrwYgWrynjZdJpsSP1nlI/THW8yqU=
 github.com/loft-sh/vcluster-sdk v0.0.0-20220118161729-753cae83d6cd/go.mod h1:Uw9cy6LIeeZikiUVAsuK8MyRe1I6lX9xLQzuWahs654=
+github.com/loft-sh/vcluster-sdk v0.0.0-20220118165718-7e04c372a5f3 h1:nrCve7OTG+8wGmZmG3Xi6smp2N9BrhufHWEZ4j7IV+U=
+github.com/loft-sh/vcluster-sdk v0.0.0-20220118165718-7e04c372a5f3/go.mod h1:Uw9cy6LIeeZikiUVAsuK8MyRe1I6lX9xLQzuWahs654=
 github.com/magiconair/properties v1.8.0/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/magiconair/properties v1.8.1/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/magiconair/properties v1.8.5/go.mod h1:y3VJvCyxH9uVvJTWEGAELF3aiYNyPKd5NZ3oSwXrF60=

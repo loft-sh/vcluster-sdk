@@ -138,3 +138,15 @@ type VirtualClusterOptions struct {
 	DeprecatedSuffix                   string
 	DeprecatedUseFakeKubelets          bool
 }
+
+func ConvertContext(registerContext *RegisterContext, logName string) *SyncContext {
+	return &SyncContext{
+		Context:                registerContext.Context,
+		Log:                    log.New(logName),
+		TargetNamespace:        registerContext.TargetNamespace,
+		PhysicalClient:         registerContext.PhysicalManager.GetClient(),
+		VirtualClient:          registerContext.VirtualManager.GetClient(),
+		CurrentNamespace:       registerContext.CurrentNamespace,
+		CurrentNamespaceClient: registerContext.CurrentNamespaceClient,
+	}
+}
