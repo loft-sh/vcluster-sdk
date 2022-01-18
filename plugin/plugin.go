@@ -24,18 +24,19 @@ import (
 var defaultManager Manager = &manager{}
 
 type Options struct {
-	// Name is the name of the plugin
-	Name string
-
 	// ListenAddress is optional and the address where to contact
 	// the vcluster plugin server at. Defaults to localhost:10099
 	ListenAddress string
 }
 
 type Manager interface {
-	// CreateContext creates a new plugin context and will block until the
+	// Init creates a new plugin context and will block until the
 	// vcluster container instance could be contacted.
-	CreateContext(opts Options) (*synccontext.RegisterContext, error)
+	Init(name string) (*synccontext.RegisterContext, error)
+
+	// InitWithOptions creates a new plugin context and will block until the
+	// vcluster container instance could be contacted.
+	InitWithOptions(name string, opts Options) (*synccontext.RegisterContext, error)
 
 	// Register makes sure the syncer will be executed as soon as start
 	// is run.
@@ -47,12 +48,39 @@ type Manager interface {
 	Start() error
 }
 
-func CreateContext(opts Options) (*synccontext.RegisterContext, error) {
-	return defaultManager.CreateContext(opts)
+func MustInit(name string) *synccontext.RegisterContext {
+	ctx, err := defaultManager.Init(name)
+	if err != nil {
+		panic(err)
+	}
+
+	return ctx
+}
+
+func Init(name string) (*synccontext.RegisterContext, error) {
+	return defaultManager.Init(name)
+}
+
+func InitWithOptions(name string, opts Options) (*synccontext.RegisterContext, error) {
+	return defaultManager.InitWithOptions(name, opts)
+}
+
+func MustRegister(syncer syncer.Object) {
+	err := defaultManager.Register(syncer)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func Register(syncer syncer.Object) error {
 	return defaultManager.Register(syncer)
+}
+
+func MustStart() {
+	err := defaultManager.Start()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func Start() error {
@@ -60,20 +88,33 @@ func Start() error {
 }
 
 type manager struct {
-	guard   sync.Mutex
-	started bool
-	syncers []syncer.Object
+	guard       sync.Mutex
+	initialized bool
+	started     bool
+	syncers     []syncer.Object
 
 	address string
 	context *synccontext.RegisterContext
 }
 
-func (m *manager) CreateContext(opts Options) (*synccontext.RegisterContext, error) {
+func (m *manager) Init(name string) (*synccontext.RegisterContext, error) {
+	return m.InitWithOptions(name, Options{})
+}
+
+func (m *manager) InitWithOptions(name string, opts Options) (*synccontext.RegisterContext, error) {
+	if name == "" {
+		return nil, fmt.Errorf("please provide a plugin name")
+	}
+
 	m.guard.Lock()
 	defer m.guard.Unlock()
 
-	log := log.New("plugin")
+	if m.initialized {
+		return nil, fmt.Errorf("plugin manager is already initialized")
+	}
+	m.initialized = true
 
+	log := log.New("plugin")
 	m.address = "localhost:10099"
 	if opts.ListenAddress != "" {
 		m.address = opts.ListenAddress
@@ -82,7 +123,7 @@ func (m *manager) CreateContext(opts Options) (*synccontext.RegisterContext, err
 	log.Infof("Try creating context...")
 	var pluginContext *remote.Context
 	err := wait.PollImmediateInfinite(time.Second*5, func() (done bool, err error) {
-		conn, err := grpc.Dial(m.address)
+		conn, err := grpc.Dial(m.address, grpc.WithInsecure())
 		if err != nil {
 			return false, nil
 		}
@@ -91,7 +132,7 @@ func (m *manager) CreateContext(opts Options) (*synccontext.RegisterContext, err
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
-		pluginContext, err = remote.NewPluginInitializerClient(conn).Register(ctx, &remote.PluginInfo{Name: opts.Name})
+		pluginContext, err = remote.NewPluginInitializerClient(conn).Register(ctx, &remote.PluginInfo{Name: name})
 		if err != nil {
 			return false, nil
 		}
@@ -209,10 +250,9 @@ func (m *manager) start() error {
 	if m.started {
 		return fmt.Errorf("manager was already started")
 	}
-	m.started = true
 
 	log.Infof("Waiting for vcluster to become leader...")
-	conn, err := grpc.Dial(m.address)
+	conn, err := grpc.Dial(m.address, grpc.WithInsecure())
 	if err != nil {
 		return fmt.Errorf("error dialing vcluster: %v", err)
 	}
@@ -225,7 +265,7 @@ func (m *manager) start() error {
 		if err != nil {
 			log.Errorf("error trying to connect to vcluster: %v", err)
 			conn.Close()
-			conn, err = grpc.Dial(m.address)
+			conn, err = grpc.Dial(m.address, grpc.WithInsecure())
 			if err != nil {
 				return false, err
 			}
@@ -238,6 +278,7 @@ func (m *manager) start() error {
 		return err
 	}
 
+	m.started = true
 	log.Infof("Starting syncers...")
 	for _, s := range m.syncers {
 		initializer, ok := s.(syncer.Initializer)

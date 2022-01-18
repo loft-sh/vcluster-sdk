@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/ghodss/yaml v1.0.0
-	github.com/loft-sh/vcluster-sdk v0.0.0
+	github.com/loft-sh/vcluster-sdk v0.0.0-20220118151633-18b083294b9f
 	k8s.io/apiextensions-apiserver v0.23.0
 	k8s.io/apimachinery v0.23.1
 	sigs.k8s.io/controller-runtime v0.11.0

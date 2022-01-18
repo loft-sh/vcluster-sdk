@@ -66,13 +66,3 @@ dev:
           remotePort: 2345
   sync:
     - imageSelector: ${PLUGIN_IMAGE}
-      excludePaths:
-        - '**'
-        - '!/pkg'
-        - '!/cmd'
-        - '!/vendor'
-        - '!/hack'
-        - '!/manifests'
-        - '!/go.mod'
-        - '!/go.sum'
-        - '!/devspace_start.sh'

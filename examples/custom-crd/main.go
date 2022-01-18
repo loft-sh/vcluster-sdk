@@ -6,18 +6,7 @@ import (
 )
 
 func main() {
-	registerContext, err := plugin.CreateContext(plugin.Options{})
-	if err != nil {
-		panic(err)
-	}
-
-	err = plugin.Register(syncers.NewCarSyncer(registerContext))
-	if err != nil {
-		panic(err)
-	}
-
-	err = plugin.Start()
-	if err != nil {
-		panic(err)
-	}
+	ctx := plugin.MustInit("cars-plugin")
+	plugin.MustRegister(syncers.NewCarSyncer(ctx))
+	plugin.MustStart()
 }
