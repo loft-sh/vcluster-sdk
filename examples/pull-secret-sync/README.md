@@ -4,6 +4,21 @@ For more information how to develop plugins in vcluster, please refer to the [of
 
 ## Development
 
+General vcluster plugin project structure:
+```
+.
+├── go.mod              # Go module definition
+├── go.sum
+├── devspace.yaml       # Development environment definition
+├── devspace_start.sh   # Development entrypoint script
+├── Dockerfile          # Production Dockerfile 
+├── Dockerfile.dev      # Development Dockerfile
+├── main.go             # Go Entrypoint
+├── plugin.yaml         # Plugin Helm Values
+├── syncers/            # Plugin Syncers
+└── manifests/          # Additional plugin resources
+```
+
 Before starting to develop, make sure you have installed the following tools on your computer:
 - [docker](https://docs.docker.com/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) with a valid kube context configured
