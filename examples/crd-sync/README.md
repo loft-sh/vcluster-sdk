@@ -1,5 +1,7 @@
 This example plugin syncs a new resource `cars` from the virtual cluster to the host cluster. It expects that this CRD was already installed in the host cluster. 
 
+For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/what-are-virtual-clusters).
+
 ## Development
 
 Before starting to develop, make sure you have installed the following tools on your computer:
@@ -49,7 +51,7 @@ docker build . -t my-repo/my-plugin:0.0.1
 docker push my-repo/my-plugin:0.0.1
 ```
 
-### Using the plugin
+### Using the Plugin
 
 To use the plugin, create a new vcluster with the `plugin.yaml`:
 
