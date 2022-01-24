@@ -2,3 +2,4 @@
 examples/**/vendor/
 examples/**/test/
 .devspace/
+.DS_Store
