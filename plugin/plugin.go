@@ -342,6 +342,7 @@ func (m *manager) start() error {
 		}
 	}
 
+	log.Infof("Successfully started plugin.")
 	return nil
 }
 

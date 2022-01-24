@@ -130,7 +130,7 @@ func (s *pullSecretSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object
 }
 
 func (s *pullSecretSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
-	// this is called when the secret in the host gets removed or
+	// this is called when the secret in the host gets removed
 	// or if the vObj is an unrelated Secret created in vcluster
 
 	// check if this particular secret was created by this plugin

@@ -1,5 +1,6 @@
 # Plugin Definition below. This is essentially a valid helm values file that will be merged
 # with the other vcluster values during vcluster create or helm install.
 plugin:
-  car:
+  bootstrap-with-deployment:
     image: loftsh/vcluster-example-mydeployment
+    imagePullPolicy: IfNotPresent
