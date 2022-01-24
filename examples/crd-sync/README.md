@@ -1,3 +1,5 @@
+## Custom Resource Definition Sync Plugin
+
 This example plugin syncs a new resource `cars` from the virtual cluster to the host cluster. It expects that this CRD was already installed in the host cluster. 
 
 For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/what-are-virtual-clusters).

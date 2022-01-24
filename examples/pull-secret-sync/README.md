@@ -1,3 +1,5 @@
+## Image Pull Secret Sync Plugin
+
 This example plugin syncs pull secrets from the host cluster into vcluster. The pull secrets are synced from the namespace where vcluster is installed into the default namespace in vcluster.
 
 For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/what-are-virtual-clusters).
