@@ -2,13 +2,13 @@ package syncer
 
 import (
 	"context"
+
 	"github.com/loft-sh/vcluster-sdk/log"
 	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controller2 "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -144,7 +144,7 @@ func (r *syncerController) enqueuePhysical(obj client.Object, q workqueue.RateLi
 
 	managed, err := r.syncer.IsManaged(obj)
 	if err != nil {
-		klog.Errorf("error checking object %v if managed: %v", obj, err)
+		r.log.Errorf("error checking object %v if managed: %v", obj, err)
 		return
 	} else if !managed {
 		return
