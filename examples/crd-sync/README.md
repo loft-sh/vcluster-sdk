@@ -16,9 +16,7 @@ kubectl apply -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/exa
 vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/crd-sync/plugin.yaml
 ```
 
-This will create a new vcluster with the plugin installed.
-
-Then test the plugin with:
+This will create a new vcluster with the plugin installed. Then test the plugin with:
 
 ```
 # Apply audi car to vcluster

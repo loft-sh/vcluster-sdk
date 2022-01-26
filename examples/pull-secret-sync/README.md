@@ -13,7 +13,7 @@ To use the plugin, create a new vcluster with the `plugin.yaml`:
 vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/pull-secret-sync/plugin.yaml
 ```
 
-After that, wait for vcluster to start up and check:
+This will create a new vcluster with the plugin installed. After that, wait for vcluster to start up and check:
 
 ```
 # Create a image pull secret in the host namespace
@@ -25,8 +25,6 @@ kubectl create secret generic regcred \
 # Check if it was synced to the vcluster
 vcluster connect my-vcluster -n my-vcluster -- kubectl get secrets
 ```
-
-This will create a new vcluster with the plugin installed.
 
 ## Building the Plugin
 
