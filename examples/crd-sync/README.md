@@ -2,7 +2,43 @@
 
 This example plugin syncs a new resource `cars` from the virtual cluster to the host cluster. It expects that this CRD was already installed in the host cluster. 
 
-For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/what-are-virtual-clusters).
+For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/plugins/overview).
+
+## Using the Plugin in vcluster
+
+To use the plugin, create a new vcluster with the `plugin.yaml`:
+
+```
+# Apply cars crd in host cluster
+kubectl apply -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/crd-sync/manifests/crds.yaml
+
+# Create vcluster with plugin
+vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/crd-sync/plugin.yaml
+```
+
+This will create a new vcluster with the plugin installed.
+
+Then test the plugin with:
+
+```
+# Apply audi car to vcluster
+vcluster connect my-vcluster -n my-vcluster -- kubectl apply -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/crd-sync/manifests/audi.yaml
+
+# Check if car got correctly synced
+kubectl get cars -n my-vcluster
+```
+
+## Building the Plugin
+To just build the plugin image and push it to the registry, run:
+```
+# Build
+docker build . -t my-repo/my-plugin:0.0.1
+
+# Push
+docker push my-repo/my-plugin:0.0.1
+```
+
+Then exchange the image in the `plugin.yaml`
 
 ## Development
 
@@ -55,29 +91,3 @@ Delete the development environment with:
 ```
 devspace purge -n vcluster
 ```
-
-## Using the Plugin in vcluster
-
-### Building the Plugin
-To just build the plugin image and push it to the registry, run:
-```
-# Build
-docker build . -t my-repo/my-plugin:0.0.1
-
-# Push
-docker push my-repo/my-plugin:0.0.1
-```
-
-### Using the Plugin
-
-To use the plugin, create a new vcluster with the `plugin.yaml`:
-
-```
-# Use local plugin.yaml
-vcluster create my-vcluster -n my-vcluster -f ./plugin.yaml
-
-# Use public plugin.yaml
-vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/crd-sync/plugin.yaml
-```
-
-This will create a new vcluster with the plugin installed.

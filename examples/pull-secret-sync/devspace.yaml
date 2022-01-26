@@ -1,7 +1,7 @@
 version: v1beta11
 vars:
   - name: PLUGIN_IMAGE
-    value: loftsh/vcluster-pull-sycret-sync-plugin
+    value: ghcr.io/loft-sh/vcluster-example-pull-sycret-sync
   - name: K3S_IMAGE
     value: rancher/k3s:v1.23.1-k3s1
   - name: SERVICE_CIDR

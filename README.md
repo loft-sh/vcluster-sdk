@@ -12,4 +12,4 @@ This project holds the official vcluster SDK, which can be used to develop plugi
 5. Enforcing certain restrictions on synced resources or extending the existing syncers of vcluster.
 6. Any other operator use case that could benefit from having access to the virtual cluster as well the host cluster at the same time.
 
-To learn more about plugins, please take a look at the [vcluster documentation](https://www.vcluster.com/docs) or [our plugin examples](https://github.com/loft-sh/vcluster-sdk/tree/main/examples).
+To learn more about plugins, please take a look at the [vcluster documentation](https://www.vcluster.com/docs/plugins/overview) or [our plugin examples](https://github.com/loft-sh/vcluster-sdk/tree/main/examples).
