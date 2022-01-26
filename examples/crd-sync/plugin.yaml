@@ -2,7 +2,7 @@
 # with the other vcluster values during vcluster create or helm install.
 plugin:
   crd-sync:
-    image: loftsh/vcluster-example-cars
+    image: ghcr.io/loft-sh/vcluster-example-crd-sync:v1
     imagePullPolicy: IfNotPresent
     rbac:
       role:

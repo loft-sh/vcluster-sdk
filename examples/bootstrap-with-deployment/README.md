@@ -2,7 +2,38 @@
 
 This example plugin applies a deployment manifest file in the vcluster. This is done on the plugin container start only. The manifest file is copied plugin source code into the container image at build time.
 
-For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/what-are-virtual-clusters).
+For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/plugins/overview).
+
+## Using the Plugin
+
+To use the plugin, create a new vcluster with the `plugin.yaml`:
+
+```
+# Use public plugin.yaml
+vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/bootstrap-with-deployment/plugin.yaml
+```
+
+After that, wait for vcluster to start up and check:
+
+```
+# Check if deployment is in vcluster
+vcluster connect my-vcluster -n my-vcluster -- kubectl get deployments
+
+# Check if pod was correctly synced to host cluster
+kubectl get po -n my-vcluster
+```
+
+## Building the Plugin
+To just build the plugin image and push it to the registry, run:
+```
+# Build
+docker build . -t my-repo/my-plugin:0.0.1
+
+# Push
+docker push my-repo/my-plugin:0.0.1
+```
+
+Then exchange the image in the `plugin.yaml`.
 
 ## Development
 
@@ -55,30 +86,3 @@ Delete the development environment with:
 ```
 devspace purge -n vcluster
 ```
-
-## Using the Plugin in vcluster
-
-### Building the Plugin
-To just build the plugin image and push it to the registry, run:
-```
-# Build
-docker build . -t my-repo/my-plugin:0.0.1
-
-# Push
-docker push my-repo/my-plugin:0.0.1
-```
-
-### Using the Plugin
-
-To use the plugin, create a new vcluster with the `plugin.yaml`:
-
-```
-# Use local plugin.yaml
-vcluster create my-vcluster -n my-vcluster -f ./plugin.yaml
-
-# Use public plugin.yaml
-vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/bootstrap-with-deployment/plugin.yaml
-```
-
-This will create a new vcluster with the plugin installed.
-
