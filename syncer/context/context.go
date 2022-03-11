@@ -80,9 +80,9 @@ type RegisterContext struct {
 	SyncerConfig clientcmd.ClientConfig
 }
 
-// VirtualClusterOptions holds the vcluster flags that were used to start the vcluster
+// VirtualClusterOptions holds the cmd flags
 type VirtualClusterOptions struct {
-	Controllers string `json:"controllers,omitempty"`
+	Controllers []string `json:"controllers,omitempty"`
 
 	ServerCaCert        string   `json:"serverCaCert,omitempty"`
 	ServerCaKey         string   `json:"serverCaKey,omitempty"`
@@ -91,9 +91,10 @@ type VirtualClusterOptions struct {
 	ClientCaCert        string   `json:"clientCaCert"`
 	KubeConfig          string   `json:"kubeConfig"`
 
-	KubeConfigSecret          string `json:"kubeConfigSecret"`
-	KubeConfigSecretNamespace string `json:"kubeConfigSecretNamespace"`
-	KubeConfigServer          string `json:"kubeConfigServer"`
+	KubeConfigSecret          string   `json:"kubeConfigSecret"`
+	KubeConfigSecretNamespace string   `json:"kubeConfigSecretNamespace"`
+	KubeConfigServer          string   `json:"kubeConfigServer"`
+	Tolerations               []string `json:"tolerations,omitempty"`
 
 	BindAddress string `json:"bindAddress"`
 	Port        int    `json:"port"`
@@ -127,6 +128,12 @@ type VirtualClusterOptions struct {
 
 	DisablePlugins      bool   `json:"disablePlugins"`
 	PluginListenAddress string `json:"pluginListenAddress"`
+
+	DefaultImageRegistry string `json:"defaultImageRegistry"`
+
+	EnforcePodSecurityStandard string `json:"enforcePodSecurityStandard"`
+
+	SyncLabels []string `json:"syncLabels"`
 
 	// DEPRECATED FLAGS
 	DeprecatedDisableSyncResources     string
