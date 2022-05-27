@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	NamespaceLabel = "vcluster.loft.sh/namespace"
-	MarkerLabel    = "vcluster.loft.sh/managed-by"
-	Suffix         = "suffix"
+	NamespaceLabel  = "vcluster.loft.sh/namespace"
+	MarkerLabel     = "vcluster.loft.sh/managed-by"
+	ControllerLabel = "vcluster.loft.sh/controlled-by"
+	Suffix          = "suffix"
 )
 
 var Owner client.Object

@@ -9,12 +9,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Base is a basic entity, which identifies the syncer through its name. Additional
+// Base is a basic entity, which identifies the action through its name. Additional
 // functionality can be added to this basic identity through implementing other interfaces
-// below. The functionality is additive, which means that syncers that implement multiple
-// interfaces are valid. The syncer or fake syncer interface are not needed to get implemented
-// and syncers that implement for example only the Initializer or IndicesRegisterer interfaces
-// are totally valid.
+// below. The functionality is additive, which means that actions that implement multiple
+// interfaces are valid. The syncer, fake syncer or hook interface are not needed to get implemented
+// and actions that implement for example only the Initializer or IndicesRegisterer interfaces
+// are valid.
 type Base interface {
 	Name() string
 }

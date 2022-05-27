@@ -6,6 +6,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ClientHook tells the sdk that this action watches on certain vcluster requests and wants
+// to mutate these. The objects this action wants to watch can be defined through the
+// Resource() function that returns a new object of the type to watch. By implementing
+// the defined interfaces below it is possible to watch on:
+// Create, Update (includes patch requests), Delete and Get requests.
+// This makes it possible to change incoming or outgoing objects on the fly, without the
+// need to completely replace a vanilla vcluster syncer.
 type ClientHook interface {
 	syncer.Base
 
