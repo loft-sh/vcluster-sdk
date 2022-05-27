@@ -81,54 +81,67 @@ type RegisterContext struct {
 }
 
 // VirtualClusterOptions holds the vcluster flags that were used to start the vcluster
+// VirtualClusterOptions holds the cmd flags
 type VirtualClusterOptions struct {
-	Controllers string `json:"controllers,omitempty"`
+	Controllers []string `json:"controllers,omitempty"`
 
 	ServerCaCert        string   `json:"serverCaCert,omitempty"`
 	ServerCaKey         string   `json:"serverCaKey,omitempty"`
 	TLSSANs             []string `json:"tlsSans,omitempty"`
 	RequestHeaderCaCert string   `json:"requestHeaderCaCert,omitempty"`
-	ClientCaCert        string   `json:"clientCaCert"`
-	KubeConfig          string   `json:"kubeConfig"`
+	ClientCaCert        string   `json:"clientCaCert,omitempty"`
+	KubeConfig          string   `json:"kubeConfig,omitempty"`
 
-	KubeConfigSecret          string `json:"kubeConfigSecret"`
-	KubeConfigSecretNamespace string `json:"kubeConfigSecretNamespace"`
-	KubeConfigServer          string `json:"kubeConfigServer"`
+	KubeConfigSecret          string   `json:"kubeConfigSecret,omitempty"`
+	KubeConfigSecretNamespace string   `json:"kubeConfigSecretNamespace,omitempty"`
+	KubeConfigServer          string   `json:"kubeConfigServer,omitempty"`
+	Tolerations               []string `json:"tolerations,omitempty"`
 
-	BindAddress string `json:"bindAddress"`
-	Port        int    `json:"port"`
+	BindAddress string `json:"bindAddress,omitempty"`
+	Port        int    `json:"port,omitempty"`
 
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 
-	TargetNamespace string `json:"targetNamespace"`
-	ServiceName     string `json:"serviceName"`
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+	ServiceName     string `json:"serviceName,omitempty"`
 
-	SetOwner bool `json:"setOwner"`
+	SetOwner bool `json:"setOwner,omitempty"`
 
-	SyncAllNodes        bool `json:"syncAllNodes"`
-	SyncNodeChanges     bool `json:"syncNodeChanges"`
-	DisableFakeKubelets bool `json:"disableFakeKubelets"`
+	SyncAllNodes        bool `json:"syncAllNodes,omitempty"`
+	EnableScheduler     bool `json:"enableScheduler,omitempty"`
+	DisableFakeKubelets bool `json:"disableFakeKubelets,omitempty"`
 
-	TranslateImages []string `json:"translateImages"`
+	TranslateImages []string `json:"translateImages,omitempty"`
 
-	NodeSelector        string `json:"nodeSelector"`
-	ServiceAccount      string `json:"serviceAccount"`
-	EnforceNodeSelector bool   `json:"enforceNodeSelector"`
+	NodeSelector        string `json:"nodeSelector,omitempty"`
+	EnforceNodeSelector bool   `json:"enforceNodeSelector,omitempty"`
+	ServiceAccount      string `json:"serviceAccount,omitempty"`
 
-	OverrideHosts               bool   `json:"overrideHosts"`
-	OverrideHostsContainerImage string `json:"overrideHostsContainerImage"`
+	OverrideHosts               bool   `json:"overrideHosts,omitempty"`
+	OverrideHostsContainerImage string `json:"overrideHostsContainerImage,omitempty"`
 
-	ClusterDomain string `json:"clusterDomain"`
+	ClusterDomain string `json:"clusterDomain,omitempty"`
 
-	LeaderElect   bool  `json:"leaderElect"`
-	LeaseDuration int64 `json:"leaseDuration"`
-	RenewDeadline int64 `json:"renewDeadline"`
-	RetryPeriod   int64 `json:"retryPeriod"`
+	LeaderElect   bool  `json:"leaderElect,omitempty"`
+	LeaseDuration int64 `json:"leaseDuration,omitempty"`
+	RenewDeadline int64 `json:"renewDeadline,omitempty"`
+	RetryPeriod   int64 `json:"retryPeriod,omitempty"`
 
-	DisablePlugins      bool   `json:"disablePlugins"`
-	PluginListenAddress string `json:"pluginListenAddress"`
+	DisablePlugins      bool     `json:"disablePlugins,omitempty"`
+	PluginListenAddress string   `json:"pluginListenAddress,omitempty"`
+	Plugins             []string `json:"plugins,omitempty"`
+
+	DefaultImageRegistry string `json:"defaultImageRegistry,omitempty"`
+
+	EnforcePodSecurityStandard string `json:"enforcePodSecurityStandard,omitempty"`
+
+	MapHostServices    []string `json:"mapHostServices,omitempty"`
+	MapVirtualServices []string `json:"mapVirtualServices,omitempty"`
+
+	SyncLabels []string `json:"syncLabels,omitempty"`
 
 	// DEPRECATED FLAGS
+	DeprecatedSyncNodeChanges          bool `json:"syncNodeChanges"`
 	DeprecatedDisableSyncResources     string
 	DeprecatedOwningStatefulSet        string
 	DeprecatedUseFakeNodes             bool

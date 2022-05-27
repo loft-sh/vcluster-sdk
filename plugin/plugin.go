@@ -37,6 +37,8 @@ type Options struct {
 	ListenAddress string
 }
 
+type LeaderElectionHook func(ctx context.Context) error
+
 type Manager interface {
 	// Init creates a new plugin context and will block until the
 	// vcluster container instance could be contacted.
@@ -101,6 +103,7 @@ type manager struct {
 	started     bool
 	syncers     []syncer.Base
 
+	name    string
 	address string
 	context *synccontext.RegisterContext
 
@@ -125,6 +128,7 @@ func (m *manager) InitWithOptions(name string, opts Options) (*synccontext.Regis
 	m.initialized = true
 
 	log := log.New("plugin")
+	m.name = name
 	m.address = "localhost:10099"
 	if opts.ListenAddress != "" {
 		m.address = opts.ListenAddress
@@ -142,10 +146,7 @@ func (m *manager) InitWithOptions(name string, opts Options) (*synccontext.Regis
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
-		pluginContext, err = remote.NewPluginInitializerClient(conn).Register(ctx, &remote.PluginInfo{
-			Name:    name,
-			Version: "v2",
-		})
+		pluginContext, err = remote.NewVClusterClient(conn).GetContext(ctx, &remote.Empty{})
 		if err != nil {
 			return false, nil
 		}
@@ -258,7 +259,7 @@ func (m *manager) Start() error {
 	return nil
 }
 
-func (m *manager) startHookServer(log log.Logger) error {
+func (m *manager) registerPlugin(log log.Logger) error {
 	serverAddress := os.Getenv(PLUGIN_SERVER_ADDRESS)
 	if serverAddress == "" {
 		log.Errorf("Environment variable %s not defined, are you using an old vcluster version?", PLUGIN_SERVER_ADDRESS)
@@ -386,24 +387,47 @@ func (m *manager) startHookServer(log log.Logger) error {
 	}
 
 	// start the grpc server
-	log.Infof("Plugin server listening on %s", serverAddress)
-	lis, err := net.Listen("tcp", serverAddress)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %v", err)
+	if len(registeredHooks) > 0 {
+		log.Infof("Plugin server listening on %s", serverAddress)
+		lis, err := net.Listen("tcp", serverAddress)
+		if err != nil {
+			return fmt.Errorf("failed to listen: %v", err)
+		}
+
+		var opts []grpc.ServerOption
+		grpcServer := grpc.NewServer(opts...)
+		remote.RegisterPluginServer(grpcServer, &pluginServer{
+			hooks:           hooks,
+			registeredHooks: registeredHooks,
+		})
+		go func() {
+			err := grpcServer.Serve(lis)
+			if err != nil {
+				panic(err)
+			}
+		}()
 	}
 
-	var opts []grpc.ServerOption
-	grpcServer := grpc.NewServer(opts...)
-	remote.RegisterPluginServer(grpcServer, &pluginServer{
-		hooks:           hooks,
-		registeredHooks: registeredHooks,
+	// register the plugin
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	conn, err := grpc.Dial(m.address, grpc.WithInsecure())
+	if err != nil {
+		return fmt.Errorf("error dialing vcluster: %v", err)
+	}
+
+	defer conn.Close()
+	_, err = remote.NewVClusterClient(conn).RegisterPlugin(ctx, &remote.RegisterPluginRequest{
+		Version:     "v1",
+		Name:        m.name,
+		Address:     serverAddress,
+		ClientHooks: registeredHooks,
 	})
-	go func() {
-		err := grpcServer.Serve(lis)
-		if err != nil {
-			panic(err)
-		}
-	}()
+	if err != nil {
+		log.Errorf("error trying to connect to vcluster: %v", err)
+		return err
+	}
 
 	return nil
 }
@@ -414,7 +438,7 @@ func (m *manager) start() error {
 		return fmt.Errorf("manager was already started")
 	}
 
-	err := m.startHookServer(log)
+	err := m.registerPlugin(log)
 	if err != nil {
 		return errors.Wrap(err, "start hook server")
 	}
@@ -429,7 +453,7 @@ func (m *manager) start() error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 		defer cancel()
 
-		isLeader, err := remote.NewPluginInitializerClient(conn).IsLeader(ctx, &remote.Empty{})
+		isLeader, err := remote.NewVClusterClient(conn).IsLeader(ctx, &remote.Empty{})
 		if err != nil {
 			log.Errorf("error trying to connect to vcluster: %v", err)
 			conn.Close()

@@ -23,10 +23,6 @@ type ApiVersionKindType struct {
 
 var _ remote.PluginServer = &pluginServer{}
 
-func (p *pluginServer) Register(ctx context.Context, req *remote.RegisterPluginRequest) (*remote.RegisterPluginResult, error) {
-	return &remote.RegisterPluginResult{ClientHooks: p.registeredHooks}, nil
-}
-
 func (p *pluginServer) Mutate(ctx context.Context, req *remote.MutateRequest) (*remote.MutateResult, error) {
 	hooks, ok := p.hooks[ApiVersionKindType{
 		ApiVersion: req.ApiVersion,

@@ -144,7 +144,7 @@ func TranslateMetadata(phyiscalNamespace string, vObj client.Object, excludedAnn
 		return nil
 	}
 
-	pObj.SetLabels(translateLabels(vObj))
+	pObj.SetLabels(translateLabels(vObj, nil))
 	pObj.SetAnnotations(translateAnnotations(vObj, nil, excludedAnnotations))
 	return pObj
 }
@@ -155,7 +155,7 @@ func (n *namespacedTranslator) TranslateMetadataUpdate(vObj client.Object, pObj 
 
 func TranslateMetadataUpdate(vObj client.Object, pObj client.Object, excludedAnnotations ...string) (bool, map[string]string, map[string]string) {
 	updatedAnnotations := translateAnnotations(vObj, pObj, excludedAnnotations)
-	updatedLabels := translateLabels(vObj)
+	updatedLabels := translateLabels(vObj, pObj)
 	return !equality.Semantic.DeepEqual(updatedAnnotations, pObj.GetAnnotations()) || !equality.Semantic.DeepEqual(updatedLabels, pObj.GetLabels()), updatedAnnotations, updatedLabels
 }
 
@@ -213,7 +213,7 @@ func translateAnnotations(vObj client.Object, pObj client.Object, excluded []str
 	return retMap
 }
 
-func translateLabels(vObj client.Object) map[string]string {
+func translateLabels(vObj client.Object, pObj client.Object) map[string]string {
 	newLabels := map[string]string{}
 	for k, v := range vObj.GetLabels() {
 		if k == translate.NamespaceLabel {
@@ -222,6 +222,12 @@ func translateLabels(vObj client.Object) map[string]string {
 		}
 
 		newLabels[ConvertLabelKey(k)] = v
+	}
+	if pObj != nil {
+		pObjLabels := pObj.GetLabels()
+		if pObjLabels != nil && pObjLabels[translate.ControllerLabel] != "" {
+			newLabels[translate.ControllerLabel] = pObjLabels[translate.ControllerLabel]
+		}
 	}
 
 	newLabels[translate.MarkerLabel] = translate.Suffix
