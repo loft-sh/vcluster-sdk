@@ -1,6 +1,6 @@
 ## Bootstrap With Deployment Plugin
 
-This example plugin applies a deployment manifest file in the vcluster. This is done on the plugin container start only. The manifest file is copied plugin source code into the container image at build time.
+This example plugin applies a deployment manifest file in the vcluster on startup. 
 
 For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/plugins/overview).
 
