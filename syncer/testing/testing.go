@@ -160,7 +160,6 @@ func stripObject(obj runtime.Object) runtime.Object {
 		panic(err)
 	}
 
-	accessor.SetClusterName("")
 	accessor.SetResourceVersion("")
 	accessor.SetOwnerReferences(nil)
 	accessor.SetGeneration(0)
