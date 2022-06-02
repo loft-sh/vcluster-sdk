@@ -2,6 +2,8 @@ package syncers
 
 import (
 	"fmt"
+	"github.com/loft-sh/vcluster-pull-secret-sync/constants"
+	"github.com/loft-sh/vcluster-sdk/translate"
 
 	"github.com/loft-sh/vcluster-sdk/syncer"
 	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
@@ -13,25 +15,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	// this particular label key is just an example
-	// it does't have any additional meaning to vcluster
-	ManagedByPluginLabelKey   = "plugin.vcluster.loft.sh/managed-by"
-	ManagedByPluginLabelValue = "pull-secret-sync"
-	ManagedByVclusterLabelKey = "vcluster.loft.sh/managed-by"
+var (
+	ManagedPullSecret = "plugin.vcluster.loft.sh/managed-by"
 )
 
-func NewPullSecretSyncer(ctx *synccontext.RegisterContext, labelSelector metav1.LabelSelector, destinationNamespace string) syncer.Syncer {
+func NewPullSecretSyncer(ctx *synccontext.RegisterContext, destinationNamespace string) syncer.Syncer {
 	return &pullSecretSyncer{
-		targetNamespace:      ctx.TargetNamespace,
-		LabelSelector:        labelSelector,
+		hostNamespace: ctx.TargetNamespace,
+
 		DestinationNamespace: destinationNamespace,
 	}
 }
 
 type pullSecretSyncer struct {
-	targetNamespace      string
-	LabelSelector        metav1.LabelSelector
+	hostNamespace string
+
 	DestinationNamespace string
 }
 
@@ -55,7 +53,7 @@ func (s *pullSecretSyncer) ReconcileStart(ctx *synccontext.SyncContext, req ctrl
 }
 
 func (s *pullSecretSyncer) ReconcileEnd() {
-	//NOOP
+	// NOOP
 }
 
 var _ syncer.UpSyncer = &pullSecretSyncer{}
@@ -66,13 +64,13 @@ func (s *pullSecretSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Obje
 		// ignore secrets that are not of "pull secret" type
 		return ctrl.Result{}, nil
 	}
-	if pSecret.GetLabels()[ManagedByVclusterLabelKey] != "" {
+	if pSecret.GetLabels()[translate.MarkerLabel] != "" {
 		// ignore Secrets synced to the host by the vcluster
 		return ctrl.Result{}, nil
 	}
 
 	labels := map[string]string{
-		ManagedByPluginLabelKey: ManagedByPluginLabelValue,
+		ManagedPullSecret: constants.PluginName,
 	}
 	for k, v := range pSecret.GetLabels() {
 		labels[k] = v
@@ -100,7 +98,7 @@ func (s *pullSecretSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Obje
 func (s *pullSecretSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
 	pSecret := pObj.(*corev1.Secret)
 	if pSecret.Type != corev1.SecretTypeDockerConfigJson {
-		if vObj.GetLabels()[ManagedByPluginLabelKey] == ManagedByPluginLabelValue {
+		if vObj.GetLabels()[ManagedPullSecret] == constants.PluginName {
 			// delete synced secret if the type of a the host secret is no longer a pull secret
 			err := ctx.VirtualClient.Delete(ctx.Context, vObj)
 			if err == nil {
@@ -134,7 +132,7 @@ func (s *pullSecretSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Ob
 	// or if the vObj is an unrelated Secret created in vcluster
 
 	// check if this particular secret was created by this plugin
-	if vObj.GetLabels()[ManagedByPluginLabelKey] == ManagedByPluginLabelValue {
+	if vObj.GetLabels()[ManagedPullSecret] == constants.PluginName {
 		// delete synced secret because the host secret was deleted
 		err := ctx.VirtualClient.Delete(ctx.Context, vObj)
 		if err == nil {
@@ -144,6 +142,7 @@ func (s *pullSecretSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Ob
 		}
 		return ctrl.Result{}, err
 	}
+
 	// ignore all unrelated Secrets
 	return ctrl.Result{}, nil
 }
@@ -159,9 +158,9 @@ func (s *pullSecretSyncer) IsManaged(pObj client.Object) (bool, error) {
 // VirtualToPhysical translates a virtual name to a physical name
 func (s *pullSecretSyncer) VirtualToPhysical(req types.NamespacedName, vObj client.Object) types.NamespacedName {
 	// the secret that is being mirrored by a particular vObj secret
-	// is located in the "TargetNamespace" of the host cluster
+	// is located in the "HostNamespace" of the host cluster
 	return types.NamespacedName{
-		Namespace: s.targetNamespace,
+		Namespace: s.hostNamespace,
 		Name:      req.Name,
 	}
 }
@@ -190,7 +189,7 @@ func (s *pullSecretSyncer) translateUpdateUp(pObj, vObj *corev1.Secret) *corev1.
 	// we sync all of them from the host, add one more to be able to detect
 	// secrets synced by this plugin, and we remove any added in the vcluster
 	expectedLabels := map[string]string{
-		ManagedByPluginLabelKey: ManagedByPluginLabelValue,
+		ManagedPullSecret: constants.PluginName,
 	}
 	for k, v := range pObj.GetLabels() {
 		expectedLabels[k] = v

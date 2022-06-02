@@ -1,20 +1,11 @@
 version: v1beta11
 vars:
   - name: PLUGIN_IMAGE
-    value: ghcr.io/loft-sh/vcluster-example-pull-sycret-sync
+    value: ghcr.io/loft-sh/vcluster-hooks-plugin
   - name: K3S_IMAGE
-    value: rancher/k3s:v1.23.1-k3s1
+    value: rancher/k3s:v1.23.5-k3s1
   - name: SERVICE_CIDR
     command: vcluster get service-cidr
-hooks:
-  - name: Install Dependencies
-    events: ["after:deploy"]
-    command: |-
-      # Install dependencies
-      if [ ! -d "vendor" ]; then
-        echo "Executing 'go mod vendor'..."
-        go mod vendor
-      fi
 images:
   vcluster:
     image: ${PLUGIN_IMAGE}
@@ -31,7 +22,7 @@ deployments:
         - plugin.yaml
       values:
         plugin:
-          pull-secret-sync:
+          cert-manager:
             image: ${PLUGIN_IMAGE}
         serviceCIDR: ${SERVICE_CIDR}
         serviceAccount:
