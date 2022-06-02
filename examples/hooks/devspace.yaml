@@ -22,7 +22,7 @@ deployments:
         - plugin.yaml
       values:
         plugin:
-          cert-manager:
+          hooks:
             image: ${PLUGIN_IMAGE}
         serviceCIDR: ${SERVICE_CIDR}
         serviceAccount:

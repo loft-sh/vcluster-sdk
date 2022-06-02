@@ -1,6 +1,6 @@
-## Image Pull Secret Sync Plugin
+## Hooks Plugin
 
-This example plugin syncs pull secrets from the host cluster into vcluster. The pull secrets are synced from the namespace where vcluster is installed into the default namespace in vcluster.
+This example plugin mutates objects vcluster is syncing to the host clsuter. 
 
 For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/plugins/overview).
 
@@ -10,20 +10,41 @@ To use the plugin, create a new vcluster with the `plugin.yaml`:
 
 ```
 # Use public plugin.yaml
-vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/pull-secret-sync/plugin.yaml
+vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/hooks/plugin.yaml
 ```
 
 This will create a new vcluster with the plugin installed. After that, wait for vcluster to start up and check:
 
+Create a file `deployment.yaml`:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 2 # tells deployment to run 2 pods matching the template
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
 ```
-# Create a image pull secret in the host namespace
-kubectl create secret generic regcred \
-    -n my-vcluster \
-    --from-file=.dockerconfigjson=$HOME/.docker/config.json \
-    --type=kubernetes.io/dockerconfigjson
 
-# Check if it was synced to the vcluster
-vcluster connect my-vcluster -n my-vcluster -- kubectl get secrets
+Then execute
+```
+# Create the deployment in the virtual cluster
+vcluster connect my-vcluster -n my-vcluster -- kubectl apply -f deployment.yaml
+
+# Check if pod label was set correctly and pod started
+k get po -n my-vcluster -l created-by-plugin=pod-hook
 ```
 
 ## Building the Plugin
