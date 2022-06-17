@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	ctx := plugin.MustInit("mydeployment-plugin")
+	ctx := plugin.MustInit("bootstrap-with-deployment")
 	plugin.MustRegister(syncers.NewMydeploymentSyncer(ctx))
 	plugin.MustStart()
 }
