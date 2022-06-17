@@ -1,5 +1,5 @@
 package constants
 
 var (
-	PluginName = "pull-secret-sync-plugin"
+	PluginName = "pull-secret-sync"
 )
