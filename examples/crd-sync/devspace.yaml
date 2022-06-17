@@ -29,7 +29,7 @@ deployments:
       chart:
         name: vcluster
         repo: https://charts.loft.sh
-        version: 0.6.0-alpha.5
+        version: 0.10.0
       valuesFiles:
         - plugin.yaml
       values:
