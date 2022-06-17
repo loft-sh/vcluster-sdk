@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	ctx := plugin.MustInit("cars-plugin")
+	ctx := plugin.MustInit("crd-sync")
 	plugin.MustRegister(syncers.NewCarSyncer(ctx))
 	plugin.MustStart()
 }
