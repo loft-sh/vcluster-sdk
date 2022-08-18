@@ -27,6 +27,7 @@ import (
 
 const (
 	PLUGIN_SERVER_ADDRESS = "VCLUSTER_PLUGIN_ADDRESS"
+	PLUGIN_NAME           = "VCLUSTER_PLUGIN_NAME"
 )
 
 var defaultManager Manager = &manager{}
@@ -35,6 +36,15 @@ type Options struct {
 	// ListenAddress is optional and the address where to contact
 	// the vcluster plugin server at. Defaults to localhost:10099
 	ListenAddress string
+
+	// NewClient is the func that creates the client to be used by the manager.
+	// If not set this will create the default DelegatingClient that will
+	// use the cache for reads and the client for writes.
+	NewClient cluster.NewClientFunc
+
+	// NewCache is the function that will create the cache to be used
+	// by the manager. If not set this will use the default new cache function.
+	NewCache cache.NewCacheFunc
 }
 
 type LeaderElectionHook func(ctx context.Context) error
@@ -42,11 +52,11 @@ type LeaderElectionHook func(ctx context.Context) error
 type Manager interface {
 	// Init creates a new plugin context and will block until the
 	// vcluster container instance could be contacted.
-	Init(name string) (*synccontext.RegisterContext, error)
+	Init() (*synccontext.RegisterContext, error)
 
 	// InitWithOptions creates a new plugin context and will block until the
 	// vcluster container instance could be contacted.
-	InitWithOptions(name string, opts Options) (*synccontext.RegisterContext, error)
+	InitWithOptions(opts Options) (*synccontext.RegisterContext, error)
 
 	// Register makes sure the syncer will be executed as soon as start
 	// is run.
@@ -58,8 +68,8 @@ type Manager interface {
 	Start() error
 }
 
-func MustInit(name string) *synccontext.RegisterContext {
-	ctx, err := defaultManager.Init(name)
+func MustInit() *synccontext.RegisterContext {
+	ctx, err := defaultManager.Init()
 	if err != nil {
 		panic(err)
 	}
@@ -67,12 +77,12 @@ func MustInit(name string) *synccontext.RegisterContext {
 	return ctx
 }
 
-func Init(name string) (*synccontext.RegisterContext, error) {
-	return defaultManager.Init(name)
+func Init() (*synccontext.RegisterContext, error) {
+	return defaultManager.Init()
 }
 
-func InitWithOptions(name string, opts Options) (*synccontext.RegisterContext, error) {
-	return defaultManager.InitWithOptions(name, opts)
+func InitWithOptions(opts Options) (*synccontext.RegisterContext, error) {
+	return defaultManager.InitWithOptions(opts)
 }
 
 func MustRegister(syncer syncer.Base) {
@@ -110,13 +120,14 @@ type manager struct {
 	hooks []*remote.ClientHook
 }
 
-func (m *manager) Init(name string) (*synccontext.RegisterContext, error) {
-	return m.InitWithOptions(name, Options{})
+func (m *manager) Init() (*synccontext.RegisterContext, error) {
+	return m.InitWithOptions(Options{})
 }
 
-func (m *manager) InitWithOptions(name string, opts Options) (*synccontext.RegisterContext, error) {
+func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, error) {
+	name := os.Getenv(PLUGIN_NAME)
 	if name == "" {
-		return nil, fmt.Errorf("please provide a plugin name")
+		return nil, fmt.Errorf("plugin name wasn't found in environment. vcluster-sdk expects the vcluster to set the %s environment variable", PLUGIN_NAME)
 	}
 
 	m.guard.Lock()
@@ -206,6 +217,8 @@ func (m *manager) InitWithOptions(name string, opts Options) (*synccontext.Regis
 		MetricsBindAddress: "0",
 		LeaderElection:     false,
 		Namespace:          virtualClusterOptions.TargetNamespace,
+		NewClient:          opts.NewClient,
+		NewCache:           opts.NewCache,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "create phyiscal manager")
@@ -214,11 +227,13 @@ func (m *manager) InitWithOptions(name string, opts Options) (*synccontext.Regis
 		Scheme:             Scheme,
 		MetricsBindAddress: "0",
 		LeaderElection:     false,
+		NewClient:          opts.NewClient,
+		NewCache:           opts.NewCache,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "create virtual manager")
 	}
-	currentNamespaceClient, err := newCurrentNamespaceClient(context.Background(), pluginContext.CurrentNamespace, physicalManager, virtualClusterOptions)
+	currentNamespaceClient, err := newCurrentNamespaceClient(context.Background(), pluginContext.CurrentNamespace, physicalManager, virtualClusterOptions, opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "create namespaced client")
 	}
@@ -538,7 +553,7 @@ func (m *manager) start() error {
 	return nil
 }
 
-func newCurrentNamespaceClient(ctx context.Context, currentNamespace string, localManager ctrl.Manager, options *synccontext.VirtualClusterOptions) (client.Client, error) {
+func newCurrentNamespaceClient(ctx context.Context, currentNamespace string, localManager ctrl.Manager, options *synccontext.VirtualClusterOptions, opts Options) (client.Client, error) {
 	var err error
 
 	// currentNamespaceCache is needed for tasks such as finding out fake kubelet ips
@@ -549,7 +564,11 @@ func newCurrentNamespaceClient(ctx context.Context, currentNamespace string, loc
 	// objects from the current namespace.
 	currentNamespaceCache := localManager.GetCache()
 	if currentNamespace != options.TargetNamespace {
-		currentNamespaceCache, err = cache.New(localManager.GetConfig(), cache.Options{
+		if opts.NewCache == nil {
+			opts.NewCache = cache.New
+		}
+
+		currentNamespaceCache, err = opts.NewCache(localManager.GetConfig(), cache.Options{
 			Scheme:    localManager.GetScheme(),
 			Mapper:    localManager.GetRESTMapper(),
 			Namespace: currentNamespace,
@@ -571,13 +590,12 @@ func newCurrentNamespaceClient(ctx context.Context, currentNamespace string, loc
 	}
 
 	// create a current namespace client
-	currentNamespaceClient, err := cluster.DefaultNewClient(currentNamespaceCache, localManager.GetConfig(), client.Options{
+	if opts.NewClient == nil {
+		opts.NewClient = cluster.DefaultNewClient
+	}
+
+	return opts.NewClient(currentNamespaceCache, localManager.GetConfig(), client.Options{
 		Scheme: localManager.GetScheme(),
 		Mapper: localManager.GetRESTMapper(),
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return currentNamespaceClient, nil
 }
