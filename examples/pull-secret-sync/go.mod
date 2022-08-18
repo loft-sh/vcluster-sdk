@@ -3,7 +3,7 @@ module github.com/loft-sh/vcluster-pull-secret-sync
 go 1.17
 
 require (
-	github.com/loft-sh/vcluster-sdk v0.2.0
+	github.com/loft-sh/vcluster-sdk v0.3.0
 	k8s.io/api v0.24.0
 	k8s.io/apimachinery v0.24.0
 	sigs.k8s.io/controller-runtime v0.12.1
