@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/loft-sh/vcluster-pull-secret-sync/constants"
 	"os"
 
 	"github.com/loft-sh/vcluster-pull-secret-sync/syncers"
@@ -20,7 +19,7 @@ func main() {
 		destinationNamespace = DefaultDestinationNamespace
 	}
 
-	ctx := plugin.MustInit(constants.PluginName)
+	ctx := plugin.MustInit()
 	plugin.MustRegister(syncers.NewPullSecretSyncer(ctx, destinationNamespace))
 	plugin.MustStart()
 }
