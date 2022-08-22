@@ -2,10 +2,12 @@ package translator
 
 import (
 	"github.com/loft-sh/vcluster-sdk/syncer/context"
+	"github.com/loft-sh/vcluster-sdk/syncer/mapper"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
 // Translator is used to translate names as well as metadata between virtual and physical objects
@@ -41,6 +43,7 @@ type MetadataTranslator interface {
 // NamespacedTranslator provides some helper functions to ease sync down translation
 type NamespacedTranslator interface {
 	Translator
+	mapper.Reverse
 
 	// EventRecorder returns
 	EventRecorder() record.EventRecorder
@@ -53,6 +56,12 @@ type NamespacedTranslator interface {
 
 	// SyncDownUpdate updates the given pObj (if not nil) in the target namespace
 	SyncDownUpdate(ctx *context.SyncContext, vObj, pObj client.Object) (ctrl.Result, error)
+
+	// AddReverseMapper adds additional indices and watchers for dependent objects
+	AddReverseMapper(ctx *context.RegisterContext, obj client.Object, indexName string, indexer client.IndexerFunc, enqueuer handler.MapFunc)
+
+	FindInNameCache(key types.NamespacedName) types.NamespacedName
+	AddToNameCache(key, value types.NamespacedName)
 }
 
 // PhysicalNameTranslator transforms a virtual cluster name to a physical name
