@@ -547,6 +547,16 @@ func (m *manager) start() error {
 				return errors.Wrapf(err, "start %s syncer", v.Name())
 			}
 		}
+
+		// controller starter?
+		controllerStarter, ok := v.(syncer.ControllerStarter)
+		if ok {
+			log.Infof("Start controller %s", v.Name())
+			err = controllerStarter.Register(m.context)
+			if err != nil {
+				return errors.Wrapf(err, "start %s controller", v.Name())
+			}
+		}
 	}
 
 	log.Infof("Successfully started plugin.")

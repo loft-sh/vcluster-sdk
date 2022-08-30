@@ -130,3 +130,9 @@ type IndicesRegisterer interface {
 type ControllerModifier interface {
 	ModifyController(ctx *context.RegisterContext, builder *builder.Builder) (*builder.Builder, error)
 }
+
+// ControllerStarter is a generic controller that can be used if the syncer abstraction does not fit
+// the use case
+type ControllerStarter interface {
+	Register(ctx *context.RegisterContext) error
+}
