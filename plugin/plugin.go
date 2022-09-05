@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 	"net"
 	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -458,6 +459,9 @@ func (m *manager) start() error {
 		return errors.Wrap(err, "start hook server")
 	}
 
+	// runID is used to track if the syncer was restarted while we are listening
+	runID := ""
+
 	log.Infof("Waiting for vcluster to become leader...")
 	conn, err := grpc.Dial(m.address, grpc.WithInsecure())
 	if err != nil {
@@ -479,11 +483,53 @@ func (m *manager) start() error {
 			return false, nil
 		}
 
+		if runID == "" {
+			runID = isLeader.RunID
+		} else if runID != isLeader.RunID {
+			return false, fmt.Errorf("syncer runID has changed while starting up, restarting plugin")
+		}
+
 		return isLeader.Leader, nil
 	})
 	if err != nil {
 		return err
 	}
+
+	// keep watching for run id
+	go func() {
+		conn, err := grpc.Dial(m.address, grpc.WithInsecure())
+		if err != nil {
+			klog.Fatalf("error dialing vcluster: %v", err)
+		}
+		defer conn.Close()
+
+		err = wait.PollInfinite(time.Second*5, func() (done bool, err error) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+
+			isLeader, err := remote.NewVClusterClient(conn).IsLeader(ctx, &remote.Empty{})
+			if err != nil {
+				log.Errorf("error trying to connect to vcluster: %v", err)
+				conn.Close()
+				conn, err = grpc.Dial(m.address, grpc.WithInsecure())
+				if err != nil {
+					return false, err
+				}
+				return false, nil
+			}
+
+			if runID != isLeader.RunID {
+				return false, fmt.Errorf("syncer has restarted, restarting plugin")
+			} else if !isLeader.Leader {
+				return false, fmt.Errorf("syncer lost leader election, restarting plugin")
+			}
+
+			return false, nil
+		})
+		if err != nil {
+			klog.Fatalf("error watching syncer: %v", err)
+		}
+	}()
 
 	m.started = true
 	log.Infof("Starting syncers...")
