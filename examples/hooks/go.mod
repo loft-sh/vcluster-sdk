@@ -3,7 +3,7 @@ module github.com/loft-sh/vcluster-pod-hooks
 go 1.17
 
 require (
-	github.com/loft-sh/vcluster-sdk v0.3.0
+	github.com/loft-sh/vcluster-sdk v0.3.2
 	github.com/pkg/errors v0.9.1
 	k8s.io/api v0.24.0
 	k8s.io/apimachinery v0.24.0
