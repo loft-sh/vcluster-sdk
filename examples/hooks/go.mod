@@ -10,6 +10,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.12.1
 )
 
+replace github.com/loft-sh/vcluster-sdk => github.com/FabianKramm/vcluster-sdk v0.0.0-20220905100907-ba4ccfef41a4
+
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/MakeNowJust/heredoc v0.0.0-20170808103936-bb23615498cd // indirect
