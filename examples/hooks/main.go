@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	_ = plugin.MustInit("hooks")
+	_ = plugin.MustInit()
 	plugin.MustRegister(hooks.NewPodHook())
 	plugin.MustRegister(hooks.NewServiceHook())
 	plugin.MustRegister(hooks.NewSecretHook())
