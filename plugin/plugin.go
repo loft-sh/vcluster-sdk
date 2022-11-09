@@ -4,6 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"os"
+	"sync"
+	"time"
+
 	"github.com/loft-sh/vcluster-sdk/clienthelper"
 	"github.com/loft-sh/vcluster-sdk/hook"
 	"github.com/loft-sh/vcluster-sdk/log"
@@ -11,19 +16,16 @@ import (
 	"github.com/loft-sh/vcluster-sdk/syncer"
 	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
 	"github.com/loft-sh/vcluster-sdk/translate"
+	"github.com/loft-sh/vcluster-sdk/translate/util"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
-	"net"
-	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
-	"sync"
-	"time"
 )
 
 const (
@@ -572,6 +574,10 @@ func (m *manager) start() error {
 	m.context.PhysicalManager.GetCache().WaitForCacheSync(m.context.Context)
 	m.context.VirtualManager.GetCache().WaitForCacheSync(m.context.Context)
 
+	err = util.FindOwner(m.context)
+	if err != nil {
+		return fmt.Errorf("error in setting owner reference %v", err)
+	}
 	// start syncers
 	for _, v := range m.syncers {
 		// fake syncer?
