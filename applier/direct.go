@@ -7,11 +7,12 @@ Originally sourced from https://github.com/kubernetes-sigs/kubebuilder-declarati
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/clientcmd"
-	"os"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -120,7 +121,6 @@ func newOptions(flags *apply.ApplyFlags, namespace string) (*apply.ApplyOptions,
 		All:             flags.All,
 		Overwrite:       flags.Overwrite,
 		OpenAPIPatch:    flags.OpenAPIPatch,
-		PruneWhitelist:  flags.PruneWhitelist,
 
 		Recorder:         recorder,
 		Namespace:        namespace,
