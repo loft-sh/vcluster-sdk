@@ -4,20 +4,26 @@ import (
 	context2 "context"
 	"crypto/sha256"
 	"encoding/hex"
-	"github.com/loft-sh/vcluster-sdk/clienthelper"
-	"github.com/loft-sh/vcluster-sdk/syncer/context"
-	"github.com/loft-sh/vcluster-sdk/translate"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/loft-sh/vcluster-sdk/clienthelper"
+	"github.com/loft-sh/vcluster-sdk/syncer/context"
+	"github.com/loft-sh/vcluster-sdk/syncer/mapper"
+	"github.com/loft-sh/vcluster-sdk/translate"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 var (
@@ -43,6 +49,8 @@ func NewNamespacedTranslator(ctx *context.RegisterContext, name string, obj clie
 		obj:           obj,
 
 		eventRecorder: ctx.VirtualManager.GetEventRecorderFor(name + "-syncer"),
+		mapperConfig:  mapper.Config{},
+		NameCache:     make(mapper.NameCache),
 	}
 }
 
@@ -56,7 +64,12 @@ type namespacedTranslator struct {
 	obj           client.Object
 
 	eventRecorder record.EventRecorder
+
+	mapperConfig mapper.Config
+	NameCache    mapper.NameCache
 }
+
+var _ mapper.Reverse = &namespacedTranslator{}
 
 func (n *namespacedTranslator) EventRecorder() record.EventRecorder {
 	return n.eventRecorder
@@ -107,6 +120,12 @@ func (n *namespacedTranslator) IsManaged(pObj client.Object) (bool, error) {
 }
 
 func (n *namespacedTranslator) VirtualToPhysical(req types.NamespacedName, vObj client.Object) types.NamespacedName {
+	// check if the key is in name cache
+	if key, ok := n.NameCache[req]; ok {
+		return key
+	}
+
+	// fallback to name translation
 	return types.NamespacedName{
 		Namespace: n.physicalNamespace,
 		Name:      translate.PhysicalName(req.Name, req.Namespace),
@@ -134,6 +153,45 @@ func (n *namespacedTranslator) PhysicalToVirtual(pObj client.Object) types.Names
 	}
 }
 
+func (n *namespacedTranslator) AddToNameCache(key, value types.NamespacedName) {
+	n.NameCache[key] = value
+}
+
+func (n *namespacedTranslator) FindInNameCache(key types.NamespacedName) types.NamespacedName {
+	return n.NameCache[key]
+}
+
+func (n *namespacedTranslator) AddReverseMapper(
+	ctx *context.RegisterContext,
+	obj client.Object,
+	indexName string, // this can be removed further
+	indexer client.IndexerFunc,
+	// since this is just a splitter with '/' probably can be removed as well
+	// and hidden away from plugin developer
+	enqueuer handler.MapFunc) {
+
+	// register indices
+	n.mapperConfig.ExtraIndices = append(n.mapperConfig.ExtraIndices, func(ctx *context.RegisterContext) error {
+		klog.Infof("registering index for %s", indexName)
+		err := ctx.VirtualManager.GetFieldIndexer().IndexField(ctx.Context, obj, indexName, indexer)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	// add watcher
+	n.mapperConfig.ExtraWatchers = append(n.mapperConfig.ExtraWatchers,
+		func(ctx *context.RegisterContext, builder *builder.Builder) (*builder.Builder, error) {
+			builder = builder.Watches(&source.Kind{
+				Type: obj,
+			}, handler.EnqueueRequestsFromMapFunc(enqueuer))
+
+			return builder, nil
+		})
+}
+
 func (n *namespacedTranslator) TranslateMetadata(vObj client.Object) client.Object {
 	return TranslateMetadata(n.physicalNamespace, vObj, n.excludedAnnotations...)
 }
@@ -151,6 +209,14 @@ func TranslateMetadata(phyiscalNamespace string, vObj client.Object, excludedAnn
 
 func (n *namespacedTranslator) TranslateMetadataUpdate(vObj client.Object, pObj client.Object) (bool, map[string]string, map[string]string) {
 	return TranslateMetadataUpdate(vObj, pObj, n.excludedAnnotations...)
+}
+
+func (n *namespacedTranslator) GetReverseMapper() mapper.Config {
+	return n.mapperConfig
+}
+
+func (n *namespacedTranslator) GetWatchers() []mapper.Watchers {
+	return n.mapperConfig.ExtraWatchers
 }
 
 func TranslateMetadataUpdate(vObj client.Object, pObj client.Object, excludedAnnotations ...string) (bool, map[string]string, map[string]string) {

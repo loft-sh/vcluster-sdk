@@ -5,6 +5,7 @@ import (
 
 	"github.com/loft-sh/vcluster-sdk/log"
 	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
+	"github.com/loft-sh/vcluster-sdk/syncer/mapper"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -174,6 +175,18 @@ func (r *syncerController) Register(ctx *synccontext.RegisterContext) error {
 			return err
 		}
 	}
+
+	// tap into extra watchers
+	reverseMapper, ok := r.syncer.(mapper.Reverse)
+	if ok {
+		for _, watcher := range reverseMapper.GetWatchers() {
+			controller, err = watcher(ctx, controller)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return controller.Complete(r)
 }
 

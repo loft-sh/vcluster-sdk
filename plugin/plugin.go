@@ -15,6 +15,7 @@ import (
 	"github.com/loft-sh/vcluster-sdk/plugin/remote"
 	"github.com/loft-sh/vcluster-sdk/syncer"
 	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
+	"github.com/loft-sh/vcluster-sdk/syncer/mapper"
 	"github.com/loft-sh/vcluster-sdk/translate"
 	"github.com/loft-sh/vcluster-sdk/translate/util"
 	"github.com/pkg/errors"
@@ -545,6 +546,15 @@ func (m *manager) start() error {
 		}
 	}
 	for _, s := range m.syncers {
+		// check if mapper.Reverse
+		reverseMapper, ok := s.(mapper.Reverse)
+		if ok {
+			reverseMapperConfig := reverseMapper.GetReverseMapper()
+			for _, index := range reverseMapperConfig.ExtraIndices {
+				index(m.context)
+			}
+		}
+
 		indexRegisterer, ok := s.(syncer.IndicesRegisterer)
 		if ok {
 			err := indexRegisterer.RegisterIndices(m.context)
