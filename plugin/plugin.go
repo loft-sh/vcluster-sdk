@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/grpc/credentials/insecure"
 	"net"
 	"os"
 	"sync"
@@ -25,7 +26,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/cluster"
 )
 
 const (
@@ -43,7 +43,7 @@ type Options struct {
 	// NewClient is the func that creates the client to be used by the manager.
 	// If not set this will create the default DelegatingClient that will
 	// use the cache for reads and the client for writes.
-	NewClient cluster.NewClientFunc
+	NewClient client.NewClientFunc
 
 	// NewCache is the function that will create the cache to be used
 	// by the manager. If not set this will use the default new cache function.
@@ -150,7 +150,7 @@ func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, e
 
 	log.Infof("Try creating context...")
 	var pluginContext *remote.Context
-	err := wait.PollImmediateInfinite(time.Second*5, func() (done bool, err error) {
+	err := wait.PollUntilContextCancel(m.context.Context, time.Second*5, true, func(_ context.Context) (done bool, err error) {
 		conn, err := grpc.Dial(m.address, grpc.WithInsecure())
 		if err != nil {
 			return false, nil
@@ -216,22 +216,22 @@ func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, e
 	restPhysicalConfig.Timeout = 0
 
 	physicalManager, err := ctrl.NewManager(restPhysicalConfig, ctrl.Options{
-		Scheme:             Scheme,
-		MetricsBindAddress: "0",
-		LeaderElection:     false,
-		Namespace:          virtualClusterOptions.TargetNamespace,
-		NewClient:          opts.NewClient,
-		NewCache:           opts.NewCache,
+		Scheme:         Scheme,
+		LeaderElection: false,
+		NewClient:      opts.NewClient,
+		NewCache:       opts.NewCache,
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{virtualClusterOptions.TargetNamespace: {}},
+		},
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "create phyiscal manager")
 	}
 	virtualManager, err := ctrl.NewManager(restVirtualConfig, ctrl.Options{
-		Scheme:             Scheme,
-		MetricsBindAddress: "0",
-		LeaderElection:     false,
-		NewClient:          opts.NewClient,
-		NewCache:           opts.NewCache,
+		Scheme:         Scheme,
+		LeaderElection: false,
+		NewClient:      opts.NewClient,
+		NewCache:       opts.NewCache,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "create virtual manager")
@@ -430,7 +430,7 @@ func (m *manager) registerPlugin(log log.Logger) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 
-	conn, err := grpc.Dial(m.address, grpc.WithInsecure())
+	conn, err := grpc.Dial(m.address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("error dialing vcluster: %v", err)
 	}
@@ -626,14 +626,10 @@ func newCurrentNamespaceClient(ctx context.Context, currentNamespace string, loc
 	// objects from the current namespace.
 	currentNamespaceCache := localManager.GetCache()
 	if currentNamespace != options.TargetNamespace {
-		if opts.NewCache == nil {
-			opts.NewCache = cache.New
-		}
-
 		currentNamespaceCache, err = opts.NewCache(localManager.GetConfig(), cache.Options{
-			Scheme:    localManager.GetScheme(),
-			Mapper:    localManager.GetRESTMapper(),
-			Namespace: currentNamespace,
+			Scheme:            localManager.GetScheme(),
+			Mapper:            localManager.GetRESTMapper(),
+			DefaultNamespaces: map[string]cache.Config{currentNamespace: {}},
 		})
 		if err != nil {
 			return nil, err
@@ -652,12 +648,11 @@ func newCurrentNamespaceClient(ctx context.Context, currentNamespace string, loc
 	}
 
 	// create a current namespace client
-	if opts.NewClient == nil {
-		opts.NewClient = cluster.DefaultNewClient
-	}
-
-	return opts.NewClient(currentNamespaceCache, localManager.GetConfig(), client.Options{
+	return opts.NewClient(localManager.GetConfig(), client.Options{
 		Scheme: localManager.GetScheme(),
 		Mapper: localManager.GetRESTMapper(),
+		Cache: &client.CacheOptions{
+			Reader: currentNamespaceCache,
+		},
 	})
 }
