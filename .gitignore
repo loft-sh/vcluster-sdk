@@ -1,6 +1,6 @@
 .idea/
 examples/**/vendor/
 examples/**/test/
-test/
+/test
 .devspace/
 .DS_Store

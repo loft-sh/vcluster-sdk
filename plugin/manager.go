@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/ghodss/yaml"
 	"github.com/loft-sh/log/logr"
 	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
@@ -41,6 +42,15 @@ type manager struct {
 	pluginServer server
 
 	syncers []syncertypes.Base
+}
+
+func (m *manager) UnmarshalConfig(into interface{}) error {
+	err := yaml.Unmarshal([]byte(os.Getenv(v2.PluginConfigEnv)), into)
+	if err != nil {
+		return fmt.Errorf("unmarshal plugin config: %w", err)
+	}
+
+	return nil
 }
 
 func (m *manager) Init() (*synccontext.RegisterContext, error) {

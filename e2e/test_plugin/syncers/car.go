@@ -57,23 +57,16 @@ func (s *carSyncer) translateUpdate(ctx context.Context, pObj, vObj *examplev1.C
 	// check annotations & labels
 	changed, updatedAnnotations, updatedLabels := s.TranslateMetadataUpdate(ctx, vObj, pObj)
 	if changed {
-		updated = newIfNil(updated, pObj)
+		updated = translator.NewIfNil(updated, pObj)
 		updated.Labels = updatedLabels
 		updated.Annotations = updatedAnnotations
 	}
 
 	// check spec
 	if !equality.Semantic.DeepEqual(vObj.Spec, pObj.Spec) {
-		updated = newIfNil(updated, pObj)
+		updated = translator.NewIfNil(updated, pObj)
 		updated.Spec = vObj.Spec
 	}
 
-	return updated
-}
-
-func newIfNil(updated *examplev1.Car, pObj *examplev1.Car) *examplev1.Car {
-	if updated == nil {
-		return pObj.DeepCopy()
-	}
 	return updated
 }

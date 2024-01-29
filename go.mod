@@ -3,6 +3,7 @@ module github.com/loft-sh/vcluster-sdk
 go 1.21.5
 
 require (
+	github.com/ghodss/yaml v1.0.0
 	github.com/hashicorp/go-plugin v1.6.0
 	github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a
 	github.com/loft-sh/vcluster v0.19.0-alpha.3
@@ -51,7 +52,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/fvbommel/sortorder v1.1.0 // indirect
-	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
