@@ -3,9 +3,10 @@ package hooks
 import (
 	"context"
 	"fmt"
-	"github.com/loft-sh/vcluster-sdk/hook"
-	"github.com/loft-sh/vcluster-sdk/syncer"
-	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
+
+	"github.com/loft-sh/vcluster-sdk/plugin"
+	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
+	synctypes "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func NewSecretHook() hook.ClientHook {
+func NewSecretHook() plugin.ClientHook {
 	return &secretHook{}
 }
 
@@ -21,7 +22,7 @@ func NewSecretHook() hook.ClientHook {
 // to the host cluster, without directly setting the annotation on the secret.
 type secretHook struct{}
 
-var _ syncer.Initializer = &secretHook{}
+var _ synctypes.Initializer = &secretHook{}
 
 func (s *secretHook) Init(ctx *synccontext.RegisterContext) error {
 	virtualClient, err := client.New(ctx.VirtualManager.GetConfig(), client.Options{
@@ -57,7 +58,7 @@ func (s *secretHook) Resource() client.Object {
 	return &corev1.Secret{}
 }
 
-var _ hook.MutateGetVirtual = &serviceHook{}
+var _ plugin.MutateGetVirtual = &serviceHook{}
 
 func (s *secretHook) MutateGetVirtual(ctx context.Context, obj client.Object) (client.Object, error) {
 	secret, ok := obj.(*corev1.Secret)

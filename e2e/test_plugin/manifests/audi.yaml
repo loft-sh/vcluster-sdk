@@ -1,0 +1,7 @@
+apiVersion: example.loft.sh/v1
+kind: Car
+metadata:
+  name: audi-a4
+spec:
+  type: "Audi"
+  seats: 4

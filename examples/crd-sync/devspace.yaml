@@ -1,18 +1,8 @@
-version: v1beta11
-vars:
-  - name: PLUGIN_IMAGE
-    value: ghcr.io/loft-sh/vcluster-example-pull-sycret-sync
-  - name: K3S_IMAGE
-    value: rancher/k3s:v1.23.1-k3s1
-  - name: SERVICE_CIDR
-    command: vcluster get service-cidr
-images:
-  vcluster:
-    image: ${PLUGIN_IMAGE}
-    dockerfile: ./Dockerfile.dev
-    rebuildStrategy: ignoreContextChanges
+version: v2beta1
+name: crd-sync
+
 hooks:
-  - name: Install Dependencies & Car Manifests
+  - name: Install Dependencies
     events: ["after:deploy"]
     command: |-
       # Install dependencies
@@ -20,28 +10,32 @@ hooks:
         echo "Executing 'go mod vendor'..."
         go mod vendor
       fi
-      
-      # Install car crd
-      kubectl apply -f manifests/crds.yaml
+
 deployments:
-  - name: vcluster
+  vcluster:
     helm:
       chart:
         name: vcluster
         repo: https://charts.loft.sh
-        version: 0.11.1
-      valuesFiles:
-        - plugin.yaml
+        version: v0.19.0-alpha.3
       values:
         plugin:
           crd-sync:
-            image: ${PLUGIN_IMAGE}
-        serviceCIDR: ${SERVICE_CIDR}
+            version: v2
+            rbac:
+              role:
+                extraRules:
+                  - apiGroups: [ "example.loft.sh" ]
+                    resources: [ "cars" ]
+                    verbs: [ "create", "delete", "patch", "update", "get", "list", "watch" ]
+              clusterRole:
+                extraRules:
+                  - apiGroups: [ "apiextensions.k8s.io" ]
+                    resources: [ "customresourcedefinitions" ]
+                    verbs: [ "get", "list", "watch" ]
         serviceAccount:
           create: false
           name: default
-        vcluster:
-          image: ${K3S_IMAGE}
         rbac:
           clusterRole:
             create: true
@@ -52,14 +46,16 @@ deployments:
             enabled: false
           livenessProbe:
             enabled: false
+
 dev:
-  terminal:
-    imageSelector: ${PLUGIN_IMAGE}
-    command: ["./devspace_start.sh"]
-  ports:
-    - imageSelector: ${PLUGIN_IMAGE}
-      forward:
-        - port: 2346
-          remotePort: 2345
-  sync:
-    - imageSelector: ${PLUGIN_IMAGE}
+  vcluster:
+    imageSelector: "ghcr.io/loft-sh/vcluster"
+    devImage: golang:1.21.5
+    workingDir: /plugins/crd-sync
+    container: syncer
+    terminal:
+      command: "./devspace_start.sh"
+    sync:
+      - path: "./:/plugins/crd-sync"
+        excludePaths:
+          - /plugin

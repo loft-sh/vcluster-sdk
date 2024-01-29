@@ -7,6 +7,6 @@ import (
 
 func main() {
 	ctx := plugin.MustInit()
-	plugin.MustRegister(syncers.NewMydeploymentSyncer(ctx))
+	plugin.MustRegister(syncers.NewMyDeploymentSyncer(ctx))
 	plugin.MustStart()
 }

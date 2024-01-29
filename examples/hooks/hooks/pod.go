@@ -3,12 +3,13 @@ package hooks
 import (
 	"context"
 	"fmt"
-	"github.com/loft-sh/vcluster-sdk/hook"
+
+	"github.com/loft-sh/vcluster-sdk/plugin"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func NewPodHook() hook.ClientHook {
+func NewPodHook() plugin.ClientHook {
 	return &podHook{}
 }
 
@@ -22,7 +23,7 @@ func (p *podHook) Resource() client.Object {
 	return &corev1.Pod{}
 }
 
-var _ hook.MutateCreatePhysical = &podHook{}
+var _ plugin.MutateCreatePhysical = &podHook{}
 
 func (p *podHook) MutateCreatePhysical(ctx context.Context, obj client.Object) (client.Object, error) {
 	pod, ok := obj.(*corev1.Pod)
@@ -37,7 +38,7 @@ func (p *podHook) MutateCreatePhysical(ctx context.Context, obj client.Object) (
 	return pod, nil
 }
 
-var _ hook.MutateUpdatePhysical = &podHook{}
+var _ plugin.MutateUpdatePhysical = &podHook{}
 
 func (p *podHook) MutateUpdatePhysical(ctx context.Context, obj client.Object) (client.Object, error) {
 	pod, ok := obj.(*corev1.Pod)

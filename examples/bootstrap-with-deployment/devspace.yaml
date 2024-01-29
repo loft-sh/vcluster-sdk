@@ -1,16 +1,6 @@
-version: v1beta11
-vars:
-  - name: PLUGIN_IMAGE
-    value: ghcr.io/loft-sh/vcluster-example-bootstrap-with-deployment
-  - name: K3S_IMAGE
-    value: rancher/k3s:v1.23.1-k3s1
-  - name: SERVICE_CIDR
-    command: vcluster get service-cidr
-images:
-  vcluster:
-    image: ${PLUGIN_IMAGE}
-    dockerfile: ./Dockerfile
-    rebuildStrategy: ignoreContextChanges
+version: v2beta1
+name: bootstrap-with-deployment
+
 hooks:
   - name: Install Dependencies
     events: ["after:deploy"]
@@ -20,23 +10,18 @@ hooks:
         echo "Executing 'go mod vendor'..."
         go mod vendor
       fi
+
 deployments:
-  - name: vcluster
+  vcluster:
     helm:
       chart:
         name: vcluster
         repo: https://charts.loft.sh
-        version: 0.11.1
+        version: v0.19.0-alpha.3
       values:
-        plugin:
-          bootstrap-with-deployment:
-            image: ${PLUGIN_IMAGE}
-        serviceCIDR: ${SERVICE_CIDR}
         serviceAccount:
           create: false
           name: default
-        vcluster:
-          image: ${K3S_IMAGE}
         rbac:
           clusterRole:
             create: true
@@ -47,14 +32,16 @@ deployments:
             enabled: false
           livenessProbe:
             enabled: false
+
 dev:
-  terminal:
-    imageSelector: ${PLUGIN_IMAGE}
-    command: ["./devspace_start.sh"]
-  ports:
-    - imageSelector: ${PLUGIN_IMAGE}
-      forward:
-        - port: 2346
-          remotePort: 2345
-  sync:
-    - imageSelector: ${PLUGIN_IMAGE}
+  vcluster:
+    imageSelector: "ghcr.io/loft-sh/vcluster"
+    devImage: golang:1.21.5
+    workingDir: /plugins/bootstrap-with-deployment
+    container: syncer
+    terminal:
+      command: "./devspace_start.sh"
+    sync:
+      - path: "./:/plugins/bootstrap-with-deployment"
+        excludePaths:
+          - /plugin
