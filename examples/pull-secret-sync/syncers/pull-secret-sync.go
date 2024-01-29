@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
+	"github.com/loft-sh/vcluster/pkg/controllers/syncer/translator"
 	synctypes "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	corev1 "k8s.io/api/core/v1"
@@ -65,8 +66,7 @@ func (s *pullSecretSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Obje
 	if pSecret.Type != corev1.SecretTypeDockerConfigJson {
 		// ignore secrets that are not of "pull secret" type
 		return ctrl.Result{}, nil
-	}
-	if pSecret.GetLabels()[translate.MarkerLabel] != "" {
+	} else if pSecret.GetLabels()[translate.MarkerLabel] != "" {
 		// ignore Secrets synced to the host by the vcluster
 		return ctrl.Result{}, nil
 	}
@@ -183,7 +183,7 @@ func (s *pullSecretSyncer) translateUpdateUp(pObj, vObj *corev1.Secret) *corev1.
 	// sync annotations
 	// we sync all of them from the host and remove any added in the vcluster
 	if !equality.Semantic.DeepEqual(vObj.GetAnnotations(), pObj.GetAnnotations()) {
-		updated = newIfNil(updated, vObj)
+		updated = translator.NewIfNil(updated, vObj)
 		updated.Annotations = pObj.GetAnnotations()
 	}
 
@@ -197,7 +197,7 @@ func (s *pullSecretSyncer) translateUpdateUp(pObj, vObj *corev1.Secret) *corev1.
 		expectedLabels[k] = v
 	}
 	if !equality.Semantic.DeepEqual(vObj.GetLabels(), expectedLabels) {
-		updated = newIfNil(updated, vObj)
+		updated = translator.NewIfNil(updated, vObj)
 		updated.Labels = expectedLabels
 	}
 
@@ -206,16 +206,9 @@ func (s *pullSecretSyncer) translateUpdateUp(pObj, vObj *corev1.Secret) *corev1.
 
 	// check data
 	if !equality.Semantic.DeepEqual(vObj.Data, pObj.Data) {
-		updated = newIfNil(updated, vObj)
+		updated = translator.NewIfNil(updated, vObj)
 		updated.Data = pObj.Data
 	}
 
-	return updated
-}
-
-func newIfNil(updated *corev1.Secret, pObj *corev1.Secret) *corev1.Secret {
-	if updated == nil {
-		return pObj.DeepCopy()
-	}
 	return updated
 }

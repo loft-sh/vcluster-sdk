@@ -35,6 +35,10 @@ type Manager interface {
 	// the functionality if the current vcluster pod is the current leader and
 	// will stop if the pod will lose leader election.
 	Start() error
+
+	// UnmarshalConfig retrieves the plugin config from environment and parses it into
+	// the given object.
+	UnmarshalConfig(into interface{}) error
 }
 
 // ClientHook tells the sdk that this action watches on certain vcluster requests and wants

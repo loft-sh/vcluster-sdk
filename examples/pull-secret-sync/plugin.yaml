@@ -5,3 +5,5 @@ plugin:
     version: v2
     image: ghcr.io/loft-sh/vcluster-example-pull-sycret-sync:v2
     imagePullPolicy: IfNotPresent
+    config:
+      destinationNamespace: "test"

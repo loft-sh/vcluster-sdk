@@ -47,3 +47,7 @@ func MustStart() {
 func Start() error {
 	return defaultManager.Start()
 }
+
+func UnmarshalConfig(into interface{}) error {
+	return defaultManager.UnmarshalConfig(into)
+}
