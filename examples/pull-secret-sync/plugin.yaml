@@ -2,5 +2,6 @@
 # with the other vcluster values during vcluster create or helm install.
 plugin:
   pull-secret-sync:
+    version: v2
     image: ghcr.io/loft-sh/vcluster-example-pull-sycret-sync:v2
     imagePullPolicy: IfNotPresent

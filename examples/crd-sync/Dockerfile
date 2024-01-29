@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.17 as builder
+FROM golang:1.21.5 as builder
 
 # Make sure we use go modules
 WORKDIR vcluster
@@ -19,6 +19,7 @@ FROM alpine
 # Set root path as working directory
 WORKDIR /
 
-COPY --from=builder /plugin .
+RUN mkdir -p /plugin
 
-ENTRYPOINT ["/plugin"]
+COPY --from=builder /plugin /plugin/plugin
+COPY manifests/ /plugin/manifests

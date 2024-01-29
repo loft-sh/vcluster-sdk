@@ -2,5 +2,6 @@
 # with the other vcluster values during vcluster create or helm install.
 plugin:
   hooks:
+    version: v2
     image: loftsh/vcluster-hooks-plugin:0.0.1
     imagePullPolicy: IfNotPresent

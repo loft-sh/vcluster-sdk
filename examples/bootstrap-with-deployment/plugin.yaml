@@ -2,5 +2,6 @@
 # with the other vcluster values during vcluster create or helm install.
 plugin:
   bootstrap-with-deployment:
-    image: ghcr.io/loft-sh/vcluster-example-bootstrap-with-deployment:v2
+    version: v2
+    image: ghcr.io/loft-sh/vcluster-example-bootstrap-with-deployment:v3
     imagePullPolicy: IfNotPresent

@@ -1,12 +1,12 @@
 package syncers
 
 import (
+	"context"
 	"fmt"
-	"github.com/loft-sh/vcluster-pull-secret-sync/constants"
-	"github.com/loft-sh/vcluster-sdk/translate"
 
-	"github.com/loft-sh/vcluster-sdk/syncer"
-	synccontext "github.com/loft-sh/vcluster-sdk/syncer/context"
+	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
+	synctypes "github.com/loft-sh/vcluster/pkg/types"
+	"github.com/loft-sh/vcluster/pkg/util/translate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,11 +17,13 @@ import (
 
 var (
 	ManagedPullSecret = "plugin.vcluster.loft.sh/managed-by"
+
+	PluginName = "pull-secret-sync"
 )
 
-func NewPullSecretSyncer(ctx *synccontext.RegisterContext, destinationNamespace string) syncer.Syncer {
+func NewPullSecretSyncer(ctx *synccontext.RegisterContext, destinationNamespace string) synctypes.Syncer {
 	return &pullSecretSyncer{
-		hostNamespace: ctx.TargetNamespace,
+		hostNamespace: ctx.Options.TargetNamespace,
 
 		DestinationNamespace: destinationNamespace,
 	}
@@ -41,7 +43,7 @@ func (s *pullSecretSyncer) Resource() client.Object {
 	return &corev1.Secret{}
 }
 
-var _ syncer.Starter = &pullSecretSyncer{}
+var _ synctypes.Starter = &pullSecretSyncer{}
 
 // ReconcileStart is executed before the syncer or fake syncer reconcile starts and can return
 // true if the rest of the reconcile should be skipped. If an error is returned, the reconcile
@@ -56,7 +58,7 @@ func (s *pullSecretSyncer) ReconcileEnd() {
 	// NOOP
 }
 
-var _ syncer.UpSyncer = &pullSecretSyncer{}
+var _ synctypes.UpSyncer = &pullSecretSyncer{}
 
 func (s *pullSecretSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Object) (ctrl.Result, error) {
 	pSecret := pObj.(*corev1.Secret)
@@ -70,7 +72,7 @@ func (s *pullSecretSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Obje
 	}
 
 	labels := map[string]string{
-		ManagedPullSecret: constants.PluginName,
+		ManagedPullSecret: PluginName,
 	}
 	for k, v := range pSecret.GetLabels() {
 		labels[k] = v
@@ -98,7 +100,7 @@ func (s *pullSecretSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Obje
 func (s *pullSecretSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
 	pSecret := pObj.(*corev1.Secret)
 	if pSecret.Type != corev1.SecretTypeDockerConfigJson {
-		if vObj.GetLabels()[ManagedPullSecret] == constants.PluginName {
+		if vObj.GetLabels()[ManagedPullSecret] == PluginName {
 			// delete synced secret if the type of a the host secret is no longer a pull secret
 			err := ctx.VirtualClient.Delete(ctx.Context, vObj)
 			if err == nil {
@@ -132,7 +134,7 @@ func (s *pullSecretSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Ob
 	// or if the vObj is an unrelated Secret created in vcluster
 
 	// check if this particular secret was created by this plugin
-	if vObj.GetLabels()[ManagedPullSecret] == constants.PluginName {
+	if vObj.GetLabels()[ManagedPullSecret] == PluginName {
 		// delete synced secret because the host secret was deleted
 		err := ctx.VirtualClient.Delete(ctx.Context, vObj)
 		if err == nil {
@@ -148,7 +150,7 @@ func (s *pullSecretSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Ob
 }
 
 // IsManaged determines if a physical object is managed by the vcluster
-func (s *pullSecretSyncer) IsManaged(pObj client.Object) (bool, error) {
+func (s *pullSecretSyncer) IsManaged(ctx context.Context, pObj client.Object) (bool, error) {
 	// we will consider all Secrets as managed in order to reconcile
 	// when a secret type changes, and we will check the type
 	// in the Sync and SyncUp methods and ignore the irrelevant ones
@@ -156,7 +158,7 @@ func (s *pullSecretSyncer) IsManaged(pObj client.Object) (bool, error) {
 }
 
 // VirtualToPhysical translates a virtual name to a physical name
-func (s *pullSecretSyncer) VirtualToPhysical(req types.NamespacedName, vObj client.Object) types.NamespacedName {
+func (s *pullSecretSyncer) VirtualToPhysical(ctx context.Context, req types.NamespacedName, vObj client.Object) types.NamespacedName {
 	// the secret that is being mirrored by a particular vObj secret
 	// is located in the "HostNamespace" of the host cluster
 	return types.NamespacedName{
@@ -166,7 +168,7 @@ func (s *pullSecretSyncer) VirtualToPhysical(req types.NamespacedName, vObj clie
 }
 
 // PhysicalToVirtual translates a physical name to a virtual name
-func (s *pullSecretSyncer) PhysicalToVirtual(pObj client.Object) types.NamespacedName {
+func (s *pullSecretSyncer) PhysicalToVirtual(ctx context.Context, pObj client.Object) types.NamespacedName {
 	// the secret mirrored to vcluster is always named the same as the
 	// original in the host, and it is located in the DestinationNamespace
 	return types.NamespacedName{
@@ -189,7 +191,7 @@ func (s *pullSecretSyncer) translateUpdateUp(pObj, vObj *corev1.Secret) *corev1.
 	// we sync all of them from the host, add one more to be able to detect
 	// secrets synced by this plugin, and we remove any added in the vcluster
 	expectedLabels := map[string]string{
-		ManagedPullSecret: constants.PluginName,
+		ManagedPullSecret: PluginName,
 	}
 	for k, v := range pObj.GetLabels() {
 		expectedLabels[k] = v

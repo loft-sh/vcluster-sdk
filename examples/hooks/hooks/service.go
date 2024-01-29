@@ -3,12 +3,13 @@ package hooks
 import (
 	"context"
 	"fmt"
-	"github.com/loft-sh/vcluster-sdk/hook"
+
+	"github.com/loft-sh/vcluster-sdk/plugin"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func NewServiceHook() hook.ClientHook {
+func NewServiceHook() plugin.ClientHook {
 	return &serviceHook{}
 }
 
@@ -23,7 +24,7 @@ func (s *serviceHook) Resource() client.Object {
 	return &corev1.Service{}
 }
 
-var _ hook.MutateCreatePhysical = &serviceHook{}
+var _ plugin.MutateCreatePhysical = &serviceHook{}
 
 func (s *serviceHook) MutateCreatePhysical(ctx context.Context, obj client.Object) (client.Object, error) {
 	service, ok := obj.(*corev1.Service)
@@ -35,7 +36,7 @@ func (s *serviceHook) MutateCreatePhysical(ctx context.Context, obj client.Objec
 	return service, nil
 }
 
-var _ hook.MutateGetVirtual = &serviceHook{}
+var _ plugin.MutateGetVirtual = &serviceHook{}
 
 // MutateGetVirtual fakes the service vcluster "sees" so that it is not trying to update the
 // ports all the time
