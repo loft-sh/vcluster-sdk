@@ -17,7 +17,7 @@ deployments:
       chart:
         name: vcluster
         repo: https://charts.loft.sh
-        version: v0.19.0-alpha.3
+        version: v0.19.0-alpha.4
       values:
         plugin:
           pull-secret-sync:

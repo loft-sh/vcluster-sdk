@@ -3,12 +3,15 @@ package plugin
 import (
 	"time"
 
+	examplev1 "github.com/loft-sh/vcluster-sdk/e2e/test_plugin/apis/v1"
+	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/loft-sh/vcluster/test/framework"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -33,13 +36,98 @@ var _ = ginkgo.Describe("Plugin test", func() {
 			Should(gomega.Equal(1))
 
 		// wait for pod to become ready
+		var podList *corev1.PodList
 		gomega.Eventually(func() bool {
-			podList, err := f.VclusterClient.CoreV1().Pods("default").List(f.Context, metav1.ListOptions{})
+			podList, err = f.VclusterClient.CoreV1().Pods("default").List(f.Context, metav1.ListOptions{})
 			framework.ExpectNoError(err)
 			return len(podList.Items) == 1 && podList.Items[0].Status.Phase == corev1.PodRunning
 		}).
 			WithPolling(pollingInterval).
 			WithTimeout(pollingDurationLong).
 			Should(gomega.BeTrue())
+
+		// get pod in host cluster
+		pod := &podList.Items[0]
+		hostPod := &corev1.Pod{}
+		err = f.HostCRClient.Get(f.Context, types.NamespacedName{Name: translate.Default.PhysicalName(pod.Name, pod.Namespace), Namespace: translate.Default.PhysicalNamespace(pod.Namespace)}, hostPod)
+		framework.ExpectNoError(err)
+
+		// check if hook worked
+		framework.ExpectEqual(hostPod.Labels["created-by-plugin"], "pod-hook")
+	})
+
+	ginkgo.It("check crd sync", func() {
+		car := &examplev1.Car{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test",
+				Namespace: "kube-system",
+			},
+			Spec: examplev1.CarSpec{
+				Type:  "Audi",
+				Seats: 4,
+			},
+		}
+
+		// create car in vcluster
+		gomega.Eventually(func() bool {
+			err := f.VclusterCRClient.Create(f.Context, car)
+			return err == nil
+		}).
+			WithPolling(pollingInterval).
+			WithTimeout(pollingDurationLong).
+			Should(gomega.BeTrue())
+
+		// wait for car to become synced
+		hostCar := &examplev1.Car{}
+		carName := types.NamespacedName{Name: translate.Default.PhysicalName(car.Name, car.Namespace), Namespace: translate.Default.PhysicalNamespace(car.Namespace)}
+		gomega.Eventually(func() bool {
+			err := f.HostCRClient.Get(f.Context, carName, hostCar)
+			return err == nil
+		}).
+			WithPolling(pollingInterval).
+			WithTimeout(pollingDurationLong).
+			Should(gomega.BeTrue())
+
+		// check if car is synced correctly
+		framework.ExpectEqual(car.Spec.Seats, hostCar.Spec.Seats)
+		framework.ExpectEqual(car.Spec.Type, hostCar.Spec.Type)
+	})
+
+	ginkgo.It("check hooks work correctly", func() {
+		// create a new service
+		service := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test123",
+				Namespace: "default",
+			},
+			Spec: corev1.ServiceSpec{
+				Type: corev1.ServiceTypeClusterIP,
+				Ports: []corev1.ServicePort{
+					{
+						Name: "test",
+						Port: int32(1000),
+					},
+				},
+			},
+		}
+
+		// create service
+		err := f.VclusterCRClient.Create(f.Context, service)
+		framework.ExpectNoError(err)
+
+		// wait for service to become synced
+		hostService := &corev1.Service{}
+		gomega.Eventually(func() bool {
+			err := f.HostCRClient.Get(f.Context, types.NamespacedName{Name: translate.Default.PhysicalName(service.Name, service.Namespace), Namespace: f.VclusterNamespace}, hostService)
+			return err == nil
+		}).
+			WithPolling(pollingInterval).
+			WithTimeout(pollingDurationLong).
+			Should(gomega.BeTrue())
+
+		// check if car is synced correctly
+		framework.ExpectEqual(len(hostService.Spec.Ports), 2)
+		framework.ExpectEqual(hostService.Spec.Ports[1].Name, "plugin")
+		framework.ExpectEqual(hostService.Spec.Ports[1].Port, int32(19000))
 	})
 })

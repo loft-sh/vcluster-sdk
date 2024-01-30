@@ -3,6 +3,7 @@ package plugin
 import (
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	syncertypes "github.com/loft-sh/vcluster/pkg/types"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -12,7 +13,7 @@ var (
 func MustInit() *synccontext.RegisterContext {
 	ctx, err := defaultManager.Init()
 	if err != nil {
-		panic(err)
+		klog.Fatalf("plugin must init: %v", err)
 	}
 
 	return ctx
@@ -29,7 +30,7 @@ func InitWithOptions(opts Options) (*synccontext.RegisterContext, error) {
 func MustRegister(syncer syncertypes.Base) {
 	err := defaultManager.Register(syncer)
 	if err != nil {
-		panic(err)
+		klog.Fatalf("plugin must register: %v", err)
 	}
 }
 
@@ -40,7 +41,7 @@ func Register(syncer syncertypes.Base) error {
 func MustStart() {
 	err := defaultManager.Start()
 	if err != nil {
-		panic(err)
+		klog.Fatalf("plugin must start: %v", err)
 	}
 }
 
