@@ -11,10 +11,10 @@ func main() {
 	_ = examplev1.AddToScheme(scheme.Scheme)
 
 	ctx := plugin.MustInit()
-	plugin.MustRegister(syncers.NewMyDeploymentSyncer(ctx))
-	plugin.MustRegister(syncers.NewCarSyncer(ctx))
 	plugin.MustRegister(syncers.NewServiceHook())
 	plugin.MustRegister(syncers.NewPodHook())
 	plugin.MustRegister(syncers.NewSecretHook())
+	plugin.MustRegister(syncers.NewMyDeploymentSyncer(ctx))
+	plugin.MustRegister(syncers.NewCarSyncer(ctx))
 	plugin.MustStart()
 }

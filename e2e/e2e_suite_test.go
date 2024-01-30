@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/loft-sh/log"
+	examplev1 "github.com/loft-sh/vcluster-sdk/e2e/test_plugin/apis/v1"
 	"github.com/loft-sh/vcluster/pkg/scheme"
 	"github.com/loft-sh/vcluster/test/framework"
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -23,6 +24,8 @@ import (
 // generated in this directory, and cluster logs will also be saved.
 // This function is called on each Ginkgo node in parallel mode.
 func TestRunE2ETests(t *testing.T) {
+	_ = examplev1.AddToScheme(scheme.Scheme)
+
 	gomega.RegisterFailHandler(ginkgo.Fail)
 	err := framework.CreateFramework(context.Background(), scheme.Scheme)
 	if err != nil {

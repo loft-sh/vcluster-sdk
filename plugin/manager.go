@@ -23,6 +23,7 @@ import (
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func newManager() Manager {
@@ -105,6 +106,7 @@ func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, e
 	if err != nil {
 		return nil, err
 	}
+	ctrl.SetLogger(logger)
 	ctx := klog.NewContext(context.Background(), logger)
 
 	// now create register context

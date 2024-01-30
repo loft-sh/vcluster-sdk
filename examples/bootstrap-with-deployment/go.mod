@@ -3,7 +3,7 @@ module github.com/loft-sh/vcluster-mydeployment-example
 go 1.21.5
 
 require (
-	github.com/loft-sh/vcluster v0.19.0-alpha.3
+	github.com/loft-sh/vcluster v0.19.0-alpha.4
 	github.com/loft-sh/vcluster-sdk v0.3.2
 	k8s.io/klog/v2 v2.120.1
 )
@@ -89,7 +89,7 @@ require (
 	github.com/loft-sh/loftctl/v3 v3.4.0-beta.11 // indirect
 	github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a // indirect
 	github.com/loft-sh/utils v0.0.29 // indirect
-	github.com/loft-sh/vcluster-values v0.0.0-20240111090139-51fcf51d7ba9 // indirect
+	github.com/loft-sh/vcluster-values v0.0.0-20240126141411-ad63b49fe451 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

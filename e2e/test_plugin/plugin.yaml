@@ -15,7 +15,7 @@ plugin:
         extraRules:
           - apiGroups: ["apiextensions.k8s.io"]
             resources: ["customresourcedefinitions"]
-            verbs: ["get", "list", "watch"]
+            verbs: ["create", "update", "get", "list", "watch"]
 
 # Make sure the cluster role is enabled or otherwise the plugin won't be able to watch custom
 # resource definitions.
