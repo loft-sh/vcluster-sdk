@@ -407,7 +407,7 @@ github.com/loft-sh/utils/pkg/command
 github.com/loft-sh/utils/pkg/downloader
 github.com/loft-sh/utils/pkg/downloader/commands
 github.com/loft-sh/utils/pkg/extract
-# github.com/loft-sh/vcluster v0.19.0-alpha.4.0.20240201075718-1f1fb0a70d6e
+# github.com/loft-sh/vcluster v0.19.0-alpha.4.0.20240201171603-e3abc343e685
 ## explicit; go 1.21.5
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/app/create
@@ -525,7 +525,7 @@ github.com/loft-sh/vcluster/pkg/util/toleration
 github.com/loft-sh/vcluster/pkg/util/translate
 github.com/loft-sh/vcluster/pkg/util/websocketproxy
 github.com/loft-sh/vcluster/test/framework
-# github.com/loft-sh/vcluster-values v0.0.0-20240131102942-9de6e2694279
+# github.com/loft-sh/vcluster-values v0.0.0-20240131133548-d47237f9bcbe
 ## explicit; go 1.21.5
 github.com/loft-sh/vcluster-values/values
 # github.com/mailru/easyjson v0.7.7

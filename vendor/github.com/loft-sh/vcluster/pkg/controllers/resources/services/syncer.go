@@ -44,8 +44,8 @@ func (s *serviceSyncer) WithOptions() *syncertypes.Options {
 	return &syncertypes.Options{DisableUIDDeletion: true}
 }
 
-func (s *serviceSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
-	return s.SyncDownCreate(ctx, vObj, s.translate(ctx.Context, vObj.(*corev1.Service)))
+func (s *serviceSyncer) SyncToHost(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+	return s.SyncToHostCreate(ctx, vObj, s.translate(ctx.Context, vObj.(*corev1.Service)))
 }
 
 func (s *serviceSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
@@ -103,16 +103,16 @@ func (s *serviceSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, v
 		translator.PrintChanges(pService, newService, ctx.Log)
 	}
 
-	return s.SyncDownUpdate(ctx, vObj, newService)
+	return s.SyncToHostUpdate(ctx, vObj, newService)
 }
 
 func isSwitchingFromExternalName(pService *corev1.Service, vService *corev1.Service) bool {
 	return vService.Spec.Type == corev1.ServiceTypeExternalName && pService.Spec.Type != vService.Spec.Type && pService.Spec.ClusterIP != ""
 }
 
-var _ syncertypes.UpSyncer = &serviceSyncer{}
+var _ syncertypes.ToVirtualSyncer = &serviceSyncer{}
 
-func (s *serviceSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Object) (ctrl.Result, error) {
+func (s *serviceSyncer) SyncToVirtual(ctx *synccontext.SyncContext, pObj client.Object) (ctrl.Result, error) {
 	if !translate.Default.IsManaged(pObj) {
 		return ctrl.Result{}, nil
 	}

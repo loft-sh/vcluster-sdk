@@ -43,7 +43,7 @@ func (s *volumeSnapshotSyncer) Init(registerContext *synccontext.RegisterContext
 
 var _ syncer.Syncer = &volumeSnapshotSyncer{}
 
-func (s *volumeSnapshotSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+func (s *volumeSnapshotSyncer) SyncToHost(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
 	vVS := vObj.(*volumesnapshotv1.VolumeSnapshot)
 	if vVS.DeletionTimestamp != nil {
 		// delete volume snapshot immediately
@@ -60,7 +60,7 @@ func (s *volumeSnapshotSyncer) SyncDown(ctx *synccontext.SyncContext, vObj clien
 		return ctrl.Result{}, err
 	}
 
-	return s.SyncDownCreate(ctx, vObj, pObj)
+	return s.SyncToHostCreate(ctx, vObj, pObj)
 }
 
 func (s *volumeSnapshotSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
@@ -153,5 +153,5 @@ func (s *volumeSnapshotSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Ob
 		translator.PrintChanges(pVS, updated, ctx.Log)
 	}
 
-	return s.SyncDownUpdate(ctx, vVS, updated)
+	return s.SyncToHostUpdate(ctx, vVS, updated)
 }

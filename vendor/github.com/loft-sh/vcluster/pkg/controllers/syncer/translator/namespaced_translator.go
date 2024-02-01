@@ -66,7 +66,7 @@ func (n *namespacedTranslator) RegisterIndices(ctx *context.RegisterContext) err
 	})
 }
 
-func (n *namespacedTranslator) SyncDownCreate(ctx *context.SyncContext, vObj, pObj client.Object) (ctrl.Result, error) {
+func (n *namespacedTranslator) SyncToHostCreate(ctx *context.SyncContext, vObj, pObj client.Object) (ctrl.Result, error) {
 	ctx.Log.Infof("create physical %s %s/%s", n.name, pObj.GetNamespace(), pObj.GetName())
 	err := ctx.PhysicalClient.Create(ctx.Context, pObj)
 	if err != nil {
@@ -82,7 +82,7 @@ func (n *namespacedTranslator) SyncDownCreate(ctx *context.SyncContext, vObj, pO
 	return ctrl.Result{}, nil
 }
 
-func (n *namespacedTranslator) SyncDownUpdate(ctx *context.SyncContext, vObj, pObj client.Object) (ctrl.Result, error) {
+func (n *namespacedTranslator) SyncToHostUpdate(ctx *context.SyncContext, vObj, pObj client.Object) (ctrl.Result, error) {
 	// this is needed because of interface nil check
 	if !(pObj == nil || (reflect.ValueOf(pObj).Kind() == reflect.Ptr && reflect.ValueOf(pObj).IsNil())) {
 		ctx.Log.Infof("updating physical %s/%s, because virtual %s have changed", pObj.GetNamespace(), pObj.GetName(), n.name)
@@ -103,7 +103,7 @@ func (n *namespacedTranslator) IsManaged(_ context2.Context, pObj client.Object)
 	return translate.Default.IsManaged(pObj), nil
 }
 
-func (n *namespacedTranslator) VirtualToPhysical(_ context2.Context, req types.NamespacedName, vObj client.Object) types.NamespacedName {
+func (n *namespacedTranslator) VirtualToHost(_ context2.Context, req types.NamespacedName, vObj client.Object) types.NamespacedName {
 	name := translate.Default.PhysicalName(req.Name, req.Namespace)
 	if n.nameTranslator != nil {
 		name = n.nameTranslator(req, vObj)
@@ -115,7 +115,7 @@ func (n *namespacedTranslator) VirtualToPhysical(_ context2.Context, req types.N
 	}
 }
 
-func (n *namespacedTranslator) PhysicalToVirtual(_ context2.Context, req types.NamespacedName, pObj client.Object) types.NamespacedName {
+func (n *namespacedTranslator) HostToVirtual(_ context2.Context, req types.NamespacedName, pObj client.Object) types.NamespacedName {
 	if pObj != nil {
 		pAnnotations := pObj.GetAnnotations()
 		if pAnnotations != nil && pAnnotations[translate.NameAnnotation] != "" {
@@ -147,7 +147,7 @@ func (n *namespacedTranslator) TranslateMetadata(ctx context2.Context, vObj clie
 
 	// reset metadata & translate name and namespace
 	translate.ResetObjectMetadata(m)
-	m.SetName(n.VirtualToPhysical(ctx, types.NamespacedName{Name: vObj.GetName(), Namespace: vObj.GetNamespace()}, vObj).Name)
+	m.SetName(n.VirtualToHost(ctx, types.NamespacedName{Name: vObj.GetName(), Namespace: vObj.GetNamespace()}, vObj).Name)
 	if vObj.GetNamespace() != "" {
 		m.SetNamespace(translate.Default.PhysicalNamespace(vObj.GetNamespace()))
 

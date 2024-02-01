@@ -19,8 +19,8 @@ type pdbSyncer struct {
 	translator.NamespacedTranslator
 }
 
-func (pdb *pdbSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
-	return pdb.SyncDownCreate(ctx, vObj, pdb.translate(ctx.Context, vObj.(*policyv1.PodDisruptionBudget)))
+func (pdb *pdbSyncer) SyncToHost(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+	return pdb.SyncToHostCreate(ctx, vObj, pdb.translate(ctx.Context, vObj.(*policyv1.PodDisruptionBudget)))
 }
 
 func (pdb *pdbSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
@@ -31,5 +31,5 @@ func (pdb *pdbSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vOb
 		translator.PrintChanges(pObj, newPDB, ctx.Log)
 	}
 
-	return pdb.SyncDownUpdate(ctx, vObj, newPDB)
+	return pdb.SyncToHostUpdate(ctx, vObj, newPDB)
 }

@@ -24,8 +24,8 @@ type endpointsSyncer struct {
 	translator.NamespacedTranslator
 }
 
-func (s *endpointsSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
-	return s.SyncDownCreate(ctx, vObj, s.translate(ctx.Context, vObj))
+func (s *endpointsSyncer) SyncToHost(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+	return s.SyncToHostCreate(ctx, vObj, s.translate(ctx.Context, vObj))
 }
 
 func (s *endpointsSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object, vObj client.Object) (ctrl.Result, error) {
@@ -34,7 +34,7 @@ func (s *endpointsSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Object,
 		translator.PrintChanges(pObj, newEndpoints, ctx.Log)
 	}
 
-	return s.SyncDownUpdate(ctx, vObj, newEndpoints)
+	return s.SyncToHostUpdate(ctx, vObj, newEndpoints)
 }
 
 var _ syncer.Starter = &endpointsSyncer{}
@@ -60,7 +60,7 @@ func (s *endpointsSyncer) ReconcileStart(ctx *synccontext.SyncContext, req ctrl.
 	} else if svc.Spec.Selector != nil {
 		// check if it was a managed endpoints object before and delete it
 		endpoints := &corev1.Endpoints{}
-		err := ctx.PhysicalClient.Get(ctx.Context, s.NamespacedTranslator.VirtualToPhysical(ctx.Context, req.NamespacedName, nil), endpoints)
+		err := ctx.PhysicalClient.Get(ctx.Context, s.NamespacedTranslator.VirtualToHost(ctx.Context, req.NamespacedName, nil), endpoints)
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
 				klog.Infof("Error retrieving endpoints: %v", err)
