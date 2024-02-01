@@ -4,7 +4,7 @@ go 1.21.5
 
 require (
 	github.com/loft-sh/vcluster v0.19.0-alpha.4.0.20240201075718-1f1fb0a70d6e
-	github.com/loft-sh/vcluster-sdk v0.4.3-0.20240130140809-e2a54547a3c0
+	github.com/loft-sh/vcluster-sdk v0.4.3-0.20240201082051-698f0808be24
 	k8s.io/api v0.29.1
 	k8s.io/apimachinery v0.29.1
 	k8s.io/klog/v2 v2.120.1
@@ -190,5 +190,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-replace github.com/loft-sh/vcluster-sdk => ../../
