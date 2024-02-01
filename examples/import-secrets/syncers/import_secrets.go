@@ -38,7 +38,7 @@ func (s *importSecretSyncer) Resource() client.Object {
 	return &corev1.Secret{}
 }
 
-var _ synctypes.UpSyncer = &importSecretSyncer{}
+var _ synctypes.ToVirtualSyncer = &importSecretSyncer{}
 
 func (s *importSecretSyncer) SyncToVirtual(ctx *synccontext.SyncContext, pObj client.Object) (ctrl.Result, error) {
 	pSecret := pObj.(*corev1.Secret)
