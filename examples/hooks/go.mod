@@ -3,8 +3,8 @@ module github.com/loft-sh/vcluster-pod-hooks
 go 1.21.5
 
 require (
-	github.com/loft-sh/vcluster v0.19.0-alpha.3
-	github.com/loft-sh/vcluster-sdk v0.3.2
+	github.com/loft-sh/vcluster v0.19.0-alpha.4
+	github.com/loft-sh/vcluster-sdk v0.4.3-0.20240130140809-e2a54547a3c0
 	github.com/pkg/errors v0.9.1
 	k8s.io/api v0.29.1
 	k8s.io/apimachinery v0.29.1
@@ -92,7 +92,7 @@ require (
 	github.com/loft-sh/loftctl/v3 v3.4.0-beta.11 // indirect
 	github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a // indirect
 	github.com/loft-sh/utils v0.0.29 // indirect
-	github.com/loft-sh/vcluster-values v0.0.0-20240111090139-51fcf51d7ba9 // indirect
+	github.com/loft-sh/vcluster-values v0.0.0-20240126141411-ad63b49fe451 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -189,5 +189,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-replace github.com/loft-sh/vcluster-sdk => ../..

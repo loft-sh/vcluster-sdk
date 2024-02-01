@@ -3,7 +3,7 @@
 plugin:
   crd-sync:
     version: v2
-    image: ghcr.io/loft-sh/vcluster-example-crd-sync:v2
+    image: ghcr.io/loft-sh/vcluster-example-crd-sync:v3
     imagePullPolicy: IfNotPresent
     rbac:
       role:

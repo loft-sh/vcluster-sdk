@@ -407,7 +407,7 @@ github.com/loft-sh/utils/pkg/command
 github.com/loft-sh/utils/pkg/downloader
 github.com/loft-sh/utils/pkg/downloader/commands
 github.com/loft-sh/utils/pkg/extract
-# github.com/loft-sh/vcluster v0.19.0-alpha.4
+# github.com/loft-sh/vcluster v0.19.0-alpha.4.0.20240201075718-1f1fb0a70d6e
 ## explicit; go 1.21.5
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/app/create
@@ -505,6 +505,7 @@ github.com/loft-sh/vcluster/pkg/util/certhelper
 github.com/loft-sh/vcluster/pkg/util/cliconfig
 github.com/loft-sh/vcluster/pkg/util/clienthelper
 github.com/loft-sh/vcluster/pkg/util/clihelper
+github.com/loft-sh/vcluster/pkg/util/commandwriter
 github.com/loft-sh/vcluster/pkg/util/compress
 github.com/loft-sh/vcluster/pkg/util/context
 github.com/loft-sh/vcluster/pkg/util/encoding
@@ -516,6 +517,7 @@ github.com/loft-sh/vcluster/pkg/util/podhelper
 github.com/loft-sh/vcluster/pkg/util/portforward
 github.com/loft-sh/vcluster/pkg/util/random
 github.com/loft-sh/vcluster/pkg/util/request
+github.com/loft-sh/vcluster/pkg/util/ringbuffer
 github.com/loft-sh/vcluster/pkg/util/serverhelper
 github.com/loft-sh/vcluster/pkg/util/servicecidr
 github.com/loft-sh/vcluster/pkg/util/stringutil
@@ -523,7 +525,7 @@ github.com/loft-sh/vcluster/pkg/util/toleration
 github.com/loft-sh/vcluster/pkg/util/translate
 github.com/loft-sh/vcluster/pkg/util/websocketproxy
 github.com/loft-sh/vcluster/test/framework
-# github.com/loft-sh/vcluster-values v0.0.0-20240126141411-ad63b49fe451
+# github.com/loft-sh/vcluster-values v0.0.0-20240131102942-9de6e2694279
 ## explicit; go 1.21.5
 github.com/loft-sh/vcluster-values/values
 # github.com/mailru/easyjson v0.7.7
@@ -552,6 +554,9 @@ github.com/mitchellh/go-testing-interface
 # github.com/mitchellh/go-wordwrap v1.0.1
 ## explicit; go 1.14
 github.com/mitchellh/go-wordwrap
+# github.com/moby/locker v1.0.1
+## explicit; go 1.13
+github.com/moby/locker
 # github.com/moby/spdystream v0.2.0
 ## explicit; go 1.13
 github.com/moby/spdystream

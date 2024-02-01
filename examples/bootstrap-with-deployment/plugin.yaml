@@ -3,5 +3,5 @@
 plugin:
   bootstrap-with-deployment:
     version: v2
-    image: ghcr.io/loft-sh/vcluster-example-bootstrap-with-deployment:v3
+    image: ghcr.io/loft-sh/vcluster-example-bootstrap-with-deployment:v4
     imagePullPolicy: IfNotPresent

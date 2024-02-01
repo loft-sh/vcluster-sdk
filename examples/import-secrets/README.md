@@ -1,6 +1,6 @@
-## Image Pull Secret Sync Plugin
+## Import Secret Plugin
 
-This example plugin syncs pull secrets from the host cluster into vcluster. The pull secrets are synced from the namespace where vcluster is installed into the default namespace in vcluster.
+This example plugin syncs all secrets with an annotation from the host cluster into vcluster. The secrets are synced from the namespace where vcluster is installed into the default namespace in vcluster.
 
 For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/plugins/overview).
 
@@ -10,20 +10,22 @@ To use the plugin, create a new vcluster with the `plugin.yaml`:
 
 ```
 # Use public plugin.yaml
-vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/pull-secret-sync/plugin.yaml
+vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/import-secrets/plugin.yaml
 ```
 
 This will create a new vcluster with the plugin installed. After that, wait for vcluster to start up and check:
 
 ```
 # Create a image pull secret in the host namespace
-kubectl create secret generic regcred \
-    -n my-vcluster \
-    --from-file=.dockerconfigjson=$HOME/.docker/config.json \
-    --type=kubernetes.io/dockerconfigjson
+kubectl create secret generic test-secret \
+    -n vcluster \
+    --from-literal=my-key=my-value
+    
+# Tell vcluster to sync the secret to namespace test and name my-test within vCluster
+kubectl annotate secret test-secret -n vcluster vcluster.loft.sh/import=test/my-test
 
 # Check if it was synced to the vcluster
-vcluster connect my-vcluster -n my-vcluster -- kubectl get secrets
+vcluster connect my-vcluster -n my-vcluster -- kubectl get secrets -A
 ```
 
 ## Building the Plugin
