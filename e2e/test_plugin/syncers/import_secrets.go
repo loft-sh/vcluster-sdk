@@ -38,9 +38,9 @@ func (s *importSecretSyncer) Resource() client.Object {
 	return &corev1.Secret{}
 }
 
-var _ synctypes.UpSyncer = &importSecretSyncer{}
+var _ synctypes.ToVirtualSyncer = &importSecretSyncer{}
 
-func (s *importSecretSyncer) SyncUp(ctx *synccontext.SyncContext, pObj client.Object) (ctrl.Result, error) {
+func (s *importSecretSyncer) SyncToVirtual(ctx *synccontext.SyncContext, pObj client.Object) (ctrl.Result, error) {
 	pSecret := pObj.(*corev1.Secret)
 
 	// ignore Secrets synced to the host by the vcluster
@@ -124,7 +124,7 @@ func (s *importSecretSyncer) Sync(ctx *synccontext.SyncContext, pObj client.Obje
 	return ctrl.Result{}, err
 }
 
-func (s *importSecretSyncer) SyncDown(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
+func (s *importSecretSyncer) SyncToHost(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
 	// this is called when the secret in the host gets removed
 	// or if the vObj is an unrelated Secret created in vcluster
 
@@ -152,8 +152,8 @@ func (s *importSecretSyncer) IsManaged(ctx context.Context, pObj client.Object) 
 	return parseFromAnnotation(pObj.GetAnnotations(), pImportAnnotation).Name != "", nil
 }
 
-// VirtualToPhysical translates a virtual name to a physical name
-func (s *importSecretSyncer) VirtualToPhysical(ctx context.Context, req types.NamespacedName, vObj client.Object) types.NamespacedName {
+// VirtualToHost translates a virtual name to a physical name
+func (s *importSecretSyncer) VirtualToHost(ctx context.Context, req types.NamespacedName, vObj client.Object) types.NamespacedName {
 	if vObj == nil {
 		return types.NamespacedName{}
 	}
@@ -167,8 +167,8 @@ func (s *importSecretSyncer) VirtualToPhysical(ctx context.Context, req types.Na
 	return name
 }
 
-// PhysicalToVirtual translates a physical name to a virtual name
-func (s *importSecretSyncer) PhysicalToVirtual(ctx context.Context, req types.NamespacedName, pObj client.Object) types.NamespacedName {
+// HostToVirtual translates a physical name to a virtual name
+func (s *importSecretSyncer) HostToVirtual(ctx context.Context, req types.NamespacedName, pObj client.Object) types.NamespacedName {
 	if pObj == nil {
 		return types.NamespacedName{}
 	}
