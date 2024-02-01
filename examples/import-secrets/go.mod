@@ -3,8 +3,8 @@ module github.com/loft-sh/vcluster-import-secrets
 go 1.21.5
 
 require (
-	github.com/loft-sh/vcluster v0.19.0-alpha.4.0.20240201075718-1f1fb0a70d6e
-	github.com/loft-sh/vcluster-sdk v0.4.3-0.20240201082051-698f0808be24
+	github.com/loft-sh/vcluster v0.19.0-alpha.4.0.20240201171603-e3abc343e685
+	github.com/loft-sh/vcluster-sdk v0.4.3-0.20240201185810-7d4d03e38701
 	k8s.io/api v0.29.1
 	k8s.io/apimachinery v0.29.1
 	k8s.io/klog/v2 v2.120.1
@@ -92,7 +92,7 @@ require (
 	github.com/loft-sh/loftctl/v3 v3.4.0-beta.11 // indirect
 	github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a // indirect
 	github.com/loft-sh/utils v0.0.29 // indirect
-	github.com/loft-sh/vcluster-values v0.0.0-20240131102942-9de6e2694279 // indirect
+	github.com/loft-sh/vcluster-values v0.0.0-20240131133548-d47237f9bcbe // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
