@@ -10,7 +10,7 @@ To use the plugin, create a new vcluster with the `plugin.yaml`:
 
 ```
 # Use public plugin.yaml
-vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/import-secrets/plugin.yaml
+vcluster create vcluster -n vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/import-secrets/plugin.yaml
 ```
 
 This will create a new vcluster with the plugin installed. After that, wait for vcluster to start up and check:
@@ -25,7 +25,7 @@ kubectl create secret generic test-secret \
 kubectl annotate secret test-secret -n vcluster vcluster.loft.sh/import=test/my-test
 
 # Check if it was synced to the vcluster
-vcluster connect my-vcluster -n my-vcluster -- kubectl get secrets -A
+vcluster connect vcluster -n vcluster -- kubectl get secrets -A
 ```
 
 ## Building the Plugin
