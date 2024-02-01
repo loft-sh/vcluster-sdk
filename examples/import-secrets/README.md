@@ -1,6 +1,6 @@
 ## Import Secret Plugin
 
-This example plugin syncs all secrets with an annotation from the host cluster into vcluster. The secrets are synced from the namespace where vcluster is installed into the default namespace in vcluster.
+This example plugin syncs all secrets with an annotation from the host cluster into vcluster. The secrets are synced from the namespace where vcluster is installed into the specified namespace in vcluster.
 
 For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/plugins/overview).
 
