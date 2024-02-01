@@ -1,5 +1,5 @@
 version: v2beta1
-name: pull-secret-sync
+name: import-secrets
 
 hooks:
   - name: Install Dependencies
@@ -42,11 +42,11 @@ dev:
   vcluster:
     imageSelector: "ghcr.io/loft-sh/vcluster"
     devImage: golang:1.21.5
-    workingDir: /plugins/pull-secret-sync
+    workingDir: /plugins/import-secrets
     container: syncer
     terminal:
       command: "./devspace_start.sh"
     sync:
-      - path: "./:/plugins/pull-secret-sync"
+      - path: "./:/plugins/import-secrets"
         excludePaths:
           - /plugin

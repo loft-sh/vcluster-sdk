@@ -84,6 +84,7 @@ type OptionsProvider interface {
 	WithOptions() *Options
 }
 
+// ObjectExcluder can be used to add custom object exclude logic to the syncer
 type ObjectExcluder interface {
 	ExcludeVirtual(vObj client.Object) bool
 	ExcludePhysical(vObj client.Object) bool
