@@ -173,7 +173,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 		// wait for update
 		gomega.Eventually(func() bool {
 			err := f.VclusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
-			return err == nil && string(vSecret.Data["test"]) == "test"
+			return err == nil && string(vSecret.Data["test"]) == "newtest"
 		}).
 			WithPolling(pollingInterval).
 			WithTimeout(pollingDurationLong).
