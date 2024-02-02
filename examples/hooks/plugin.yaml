@@ -3,5 +3,5 @@
 plugin:
   hooks:
     version: v2
-    image: loftsh/vcluster-example-hooks:v1
+    image: ghcr.io/loft-sh/vcluster-example-hooks:v1
     imagePullPolicy: IfNotPresent
