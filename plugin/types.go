@@ -4,6 +4,7 @@ import (
 	"context"
 
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
+	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
 	syncertypes "github.com/loft-sh/vcluster/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,6 +40,9 @@ type Manager interface {
 	// UnmarshalConfig retrieves the plugin config from environment and parses it into
 	// the given object.
 	UnmarshalConfig(into interface{}) error
+
+	// ProConfig returns the pro config retrieved by vCluster.Pro
+	ProConfig() v2.InitConfigPro
 }
 
 // ClientHook tells the sdk that this action watches on certain vcluster requests and wants

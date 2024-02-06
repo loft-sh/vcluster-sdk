@@ -29,6 +29,11 @@ type InstanceCreateInput struct {
 
 	// FeatureUse contains information about what features are used
 	FeatureUsage map[string]bool `json:"features,omitempty" form:"features"`
+
+	// DebugInstanceID is the ID of the instance. This is only used for testing purposes.
+	// Should never be sent from production instances.
+	// Requires authentication via an access key.
+	DebugInstanceID *string `json:"debugInstanceID,omitempty" form:"debugInstanceID" hash:"-"`
 }
 
 // InstanceCreateOutput is the struct holding all information returned from "instance create"

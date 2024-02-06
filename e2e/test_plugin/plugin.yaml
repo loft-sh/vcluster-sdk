@@ -1,10 +1,21 @@
 # Plugin Definition below. This is essentially a valid helm values file that will be merged
 # with the other vcluster values during vcluster create or helm install.
 plugin:
+  other-plugin:
+    version: v2
+    config:
+      my-other-config: "test"
   test-plugin:
     version: v2
     image: ghcr.io/loft-sh/test-plugin:v1
     imagePullPolicy: Never
+    config:
+      string: "string"
+      int: 123
+      map:
+        entry: "entry"
+      array:
+        - entry
     rbac:
       role:
         extraRules:

@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VCLUSTER_VERSION: v0.19.0-alpha.4
+  VCLUSTER_VERSION: v0.19.0-beta.2
   VCLUSTER_SUFFIX: vcluster
   VCLUSTER_NAME: vcluster
   VCLUSTER_NAMESPACE: vcluster
@@ -81,7 +81,7 @@ jobs:
         run: |
           set -x
           sleep 1
-          kubectl wait --for=condition=ready pod -l app=${{ env.VCLUSTER_SUFFIX }} -n ${{ env.VCLUSTER_NAMESPACE }} --timeout=300s
+          kubectl wait --for=condition=ready pod -l app=${{ env.VCLUSTER_SUFFIX }} -n ${{ env.VCLUSTER_NAMESPACE }} --timeout=120s
         continue-on-error: true
 
       - name: Collect deployment information in case vcluster fails to start

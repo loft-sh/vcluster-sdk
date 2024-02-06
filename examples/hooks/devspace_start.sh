@@ -7,7 +7,7 @@ COLOR_RESET="\033[0m"
 if [ ! -f "/vcluster/syncer" ]; then
   echo "Downloading vCluster syncer..."
   mkdir -p /vcluster
-  curl -L -o /vcluster/syncer "https://github.com/loft-sh/vcluster/releases/download/v0.19.0-alpha.4/syncer-linux-$(go env GOARCH)"
+  curl -L -o /vcluster/syncer "https://github.com/loft-sh/vcluster/releases/download/v0.19.0-beta.2/syncer-linux-$(go env GOARCH)"
   chmod +x /vcluster/syncer
   echo "Successfully downloaded syncer"
 fi

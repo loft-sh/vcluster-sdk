@@ -11,11 +11,11 @@ import (
 	"github.com/loft-sh/log/logr"
 	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
+	"github.com/loft-sh/vcluster/pkg/options"
 	"github.com/loft-sh/vcluster/pkg/plugin/types"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
 	"github.com/loft-sh/vcluster/pkg/scheme"
 	"github.com/loft-sh/vcluster/pkg/setup"
-	"github.com/loft-sh/vcluster/pkg/setup/options"
 	syncertypes "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 	contextutil "github.com/loft-sh/vcluster/pkg/util/context"
@@ -43,6 +43,8 @@ type manager struct {
 	pluginServer server
 
 	syncers []syncertypes.Base
+
+	proConfig v2.InitConfigPro
 }
 
 func (m *manager) UnmarshalConfig(into interface{}) error {
@@ -52,6 +54,13 @@ func (m *manager) UnmarshalConfig(into interface{}) error {
 	}
 
 	return nil
+}
+
+func (m *manager) ProConfig() v2.InitConfigPro {
+	m.m.Lock()
+	defer m.m.Unlock()
+
+	return m.proConfig
 }
 
 func (m *manager) Init() (*synccontext.RegisterContext, error) {
@@ -143,6 +152,7 @@ func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, e
 	}
 
 	m.context = contextutil.ToRegisterContext(controllerCtx)
+	m.proConfig = initConfig.Pro
 	return m.context, nil
 }
 

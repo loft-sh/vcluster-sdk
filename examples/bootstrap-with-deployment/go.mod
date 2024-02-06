@@ -3,7 +3,7 @@ module github.com/loft-sh/vcluster-mydeployment-example
 go 1.21.5
 
 require (
-	github.com/loft-sh/vcluster v0.19.0-alpha.4.0.20240201171603-e3abc343e685
+	github.com/loft-sh/vcluster v0.19.0-beta.1.0.20240207101352-5dc198537487
 	github.com/loft-sh/vcluster-sdk v0.4.3-0.20240201185810-7d4d03e38701
 	k8s.io/klog/v2 v2.120.1
 )
@@ -80,16 +80,16 @@ require (
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/kubernetes-csi/external-snapshotter/client/v4 v4.2.0 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
-	github.com/loft-sh/admin-apis v0.0.0-20231102064836-7a6574be5f16 // indirect
-	github.com/loft-sh/agentapi/v3 v3.4.0-beta.11.0.20240123094803-669b6def4eb6 // indirect
-	github.com/loft-sh/analytics-client v0.0.0-20231127192707-f76e263f6c83 // indirect
+	github.com/loft-sh/admin-apis v0.0.0-20240203010124-3600c1c582a8 // indirect
+	github.com/loft-sh/agentapi/v3 v3.4.0-beta.12.0.20240207094449-7adc00ae1265 // indirect
+	github.com/loft-sh/analytics-client v0.0.0-20240206084604-1302688c3d4c // indirect
 	github.com/loft-sh/api/v3 v3.4.0-beta.11 // indirect
-	github.com/loft-sh/apiserver v0.0.0-20240122115656-e1a690b2e2d8 // indirect
+	github.com/loft-sh/apiserver v0.0.0-20240125143607-a106e2f2e0f1 // indirect
 	github.com/loft-sh/jspolicy v0.2.2 // indirect
 	github.com/loft-sh/loftctl/v3 v3.4.0-beta.11 // indirect
 	github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a // indirect
 	github.com/loft-sh/utils v0.0.29 // indirect
-	github.com/loft-sh/vcluster-values v0.0.0-20240131133548-d47237f9bcbe // indirect
+	github.com/loft-sh/vcluster-values v0.0.0-20240207093538-4bbb24e9f699 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
