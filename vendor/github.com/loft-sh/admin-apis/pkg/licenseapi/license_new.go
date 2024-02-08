@@ -101,6 +101,11 @@ func New(product ProductName) *License {
 						Name:        string(VirtualClusterProDistroIsolatedControlPlane),
 						Status:      virtualClusterStatus,
 					},
+					{
+						DisplayName: "Centralized Admission Control",
+						Name:        string(VirtualClusterProDistroCentralizedAdmissionControl),
+						Status:      virtualClusterStatus,
+					},
 				},
 			},
 			{
