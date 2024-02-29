@@ -616,6 +616,8 @@ github.com/loft-sh/agentapi/v3 v3.4.0-beta.12.0.20240207094449-7adc00ae1265 h1:S
 github.com/loft-sh/agentapi/v3 v3.4.0-beta.12.0.20240207094449-7adc00ae1265/go.mod h1:Ln2nKIXWwgCYqA+NflEu182x3r0Zb7KZnzJ4LHOMP7Y=
 github.com/loft-sh/analytics-client v0.0.0-20240206084604-1302688c3d4c h1:WeOXXSGCdE6s0+fargq3Hs0aYx+TMZoF9Kb45fkubys=
 github.com/loft-sh/analytics-client v0.0.0-20240206084604-1302688c3d4c/go.mod h1:FFWcGASyM2QlWTDTCG/WBVM/XYr8btqYt335TFNRCFg=
+github.com/loft-sh/analytics-client v0.0.0-20240219162240-2f4c64b2494e h1:JcPnMaoczikvpasi8OJ47dCkWZjfgFubWa4V2SZo7h0=
+github.com/loft-sh/analytics-client v0.0.0-20240219162240-2f4c64b2494e/go.mod h1:FFWcGASyM2QlWTDTCG/WBVM/XYr8btqYt335TFNRCFg=
 github.com/loft-sh/api/v3 v3.4.0-beta.11 h1:kh9oqGdco1YAUGjgw5LK9Z++4KLw561QANvGko312C8=
 github.com/loft-sh/api/v3 v3.4.0-beta.11/go.mod h1:eTUHPQ6RdnC4w+xYUaIVLJME9s9OsO2svbcWDrGGXX8=
 github.com/loft-sh/apiserver v0.0.0-20240125143607-a106e2f2e0f1 h1:pdT9I+6jg5YV9vTlG4b0RRao3EvwjSNmH0Cihv7bPUg=
@@ -630,6 +632,7 @@ github.com/loft-sh/utils v0.0.29 h1:P/MObccXToAZy2QoJSQDJ+OJx1qHitpFHEVj3QBSNJs=
 github.com/loft-sh/utils v0.0.29/go.mod h1:9hlX9cGpWHg3mNi/oBlv3X4ePGDMK66k8MbOZGFMDTI=
 github.com/loft-sh/vcluster v0.19.0-beta.1.0.20240207101352-5dc198537487 h1:kW1HEIr6wHXueI8OmBN6DGzRhIy/P4u8hcOnbIzLE0c=
 github.com/loft-sh/vcluster v0.19.0-beta.1.0.20240207101352-5dc198537487/go.mod h1:5PQdcVunYGZZKgkY1q8ibt0TLspMAFoVn3vNvczKNU8=
+github.com/loft-sh/vcluster-sdk v0.4.3-0.20240201185810-7d4d03e38701/go.mod h1:6jrgXdwfHS0lKcfkNQrl7vmpRqo8vv1Un7cpC0oONV4=
 github.com/loft-sh/vcluster-values v0.0.0-20240207093538-4bbb24e9f699 h1:lbbIlSpl/sz1iY/Tl/VUOU8NtFe31uwvlUbANK04mDM=
 github.com/loft-sh/vcluster-values v0.0.0-20240207093538-4bbb24e9f699/go.mod h1:J34xtWyMbjM+NRgVWxO0IVDB5XYUaX52jPQNqEAhu4M=
 github.com/magiconair/properties v1.8.1/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
