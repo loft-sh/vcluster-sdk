@@ -82,7 +82,7 @@ require (
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/loft-sh/admin-apis v0.0.0-20240203010124-3600c1c582a8 // indirect
 	github.com/loft-sh/agentapi/v3 v3.4.0-beta.12.0.20240207094449-7adc00ae1265 // indirect
-	github.com/loft-sh/analytics-client v0.0.0-20240206084604-1302688c3d4c // indirect
+	github.com/loft-sh/analytics-client v0.0.0-20240219162240-2f4c64b2494e // indirect
 	github.com/loft-sh/api/v3 v3.4.0-beta.11 // indirect
 	github.com/loft-sh/apiserver v0.0.0-20240125143607-a106e2f2e0f1 // indirect
 	github.com/loft-sh/jspolicy v0.2.2 // indirect
