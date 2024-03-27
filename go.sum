@@ -614,8 +614,6 @@ github.com/loft-sh/admin-apis v0.0.0-20240203010124-3600c1c582a8 h1:nuY9Vgvabh2F
 github.com/loft-sh/admin-apis v0.0.0-20240203010124-3600c1c582a8/go.mod h1:MWczNwKvWssHo1KaeZKaWDdRLYSNbWqQBGsTLoCNd7U=
 github.com/loft-sh/agentapi/v3 v3.4.0-beta.12.0.20240207094449-7adc00ae1265 h1:SUAdOY4H2n04JlI2So/kyRaH/HEpnoH//cewI4C4vyY=
 github.com/loft-sh/agentapi/v3 v3.4.0-beta.12.0.20240207094449-7adc00ae1265/go.mod h1:Ln2nKIXWwgCYqA+NflEu182x3r0Zb7KZnzJ4LHOMP7Y=
-github.com/loft-sh/analytics-client v0.0.0-20240206084604-1302688c3d4c h1:WeOXXSGCdE6s0+fargq3Hs0aYx+TMZoF9Kb45fkubys=
-github.com/loft-sh/analytics-client v0.0.0-20240206084604-1302688c3d4c/go.mod h1:FFWcGASyM2QlWTDTCG/WBVM/XYr8btqYt335TFNRCFg=
 github.com/loft-sh/analytics-client v0.0.0-20240219162240-2f4c64b2494e h1:JcPnMaoczikvpasi8OJ47dCkWZjfgFubWa4V2SZo7h0=
 github.com/loft-sh/analytics-client v0.0.0-20240219162240-2f4c64b2494e/go.mod h1:FFWcGASyM2QlWTDTCG/WBVM/XYr8btqYt335TFNRCFg=
 github.com/loft-sh/api/v3 v3.4.0-beta.11 h1:kh9oqGdco1YAUGjgw5LK9Z++4KLw561QANvGko312C8=
@@ -630,10 +628,8 @@ github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a h1:/gqqjKpcHEdFXIX41lx
 github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a/go.mod h1:YImeRjXH34Yf5E79T7UHBQpDZl9fIaaFRgyZ/bkY+UQ=
 github.com/loft-sh/utils v0.0.29 h1:P/MObccXToAZy2QoJSQDJ+OJx1qHitpFHEVj3QBSNJs=
 github.com/loft-sh/utils v0.0.29/go.mod h1:9hlX9cGpWHg3mNi/oBlv3X4ePGDMK66k8MbOZGFMDTI=
-github.com/loft-sh/vcluster v0.19.0-beta.2 h1:fAHWadyS/8P7aUSbCPKujEAHbuTgaYBOVazkVhYyeS8=
-github.com/loft-sh/vcluster v0.19.0-beta.2/go.mod h1:5PQdcVunYGZZKgkY1q8ibt0TLspMAFoVn3vNvczKNU8=
-github.com/loft-sh/vcluster-values v0.0.0-20240207093538-4bbb24e9f699 h1:lbbIlSpl/sz1iY/Tl/VUOU8NtFe31uwvlUbANK04mDM=
-github.com/loft-sh/vcluster-values v0.0.0-20240207093538-4bbb24e9f699/go.mod h1:J34xtWyMbjM+NRgVWxO0IVDB5XYUaX52jPQNqEAhu4M=
+github.com/loft-sh/vcluster v0.20.0-alpha.2.0.20240403130844-8bb987ed97b4 h1:D486kUE5ZQSx2DDQQ5kf/gowKZG/dNw7As4vg9WR7dw=
+github.com/loft-sh/vcluster v0.20.0-alpha.2.0.20240403130844-8bb987ed97b4/go.mod h1:Ty7km/e/U7wVF9kIqROOR51/XezgHEtS/za0QVPhKkU=
 github.com/magiconair/properties v1.8.1/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
 github.com/magiconair/properties v1.8.5/go.mod h1:y3VJvCyxH9uVvJTWEGAELF3aiYNyPKd5NZ3oSwXrF60=
 github.com/mailru/easyjson v0.0.0-20160728113105-d5b7844b561a/go.mod h1:C1wdFJiN94OJF2b5HbByQZoLdCWB1Yqtg26g4irojpc=

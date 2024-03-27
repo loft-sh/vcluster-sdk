@@ -2,8 +2,9 @@ package types
 
 import (
 	"context"
+	"net/http"
 
-	"github.com/loft-sh/vcluster/pkg/options"
+	"github.com/loft-sh/vcluster/pkg/config"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -14,11 +15,9 @@ type Manager interface {
 	// Start starts the plugins with the given information
 	Start(
 		ctx context.Context,
-		currentNamespace, targetNamespace string,
 		virtualKubeConfig *rest.Config,
-		physicalKubeConfig *rest.Config,
 		syncerConfig *clientcmdapi.Config,
-		options *options.VirtualClusterOptions,
+		config *config.VirtualClusterConfig,
 	) error
 
 	// SetLeader sets the leader for the plugins
@@ -38,6 +37,9 @@ type Manager interface {
 
 	// SetProFeatures is used by vCluster.Pro to signal what pro features are enabled
 	SetProFeatures(proFeatures map[string]bool)
+	// WithInterceptors is a middleware that allows us to delegate some requests to out of
+	// tree plugins
+	WithInterceptors(http.Handler) http.Handler
 }
 
 type VersionKindType struct {

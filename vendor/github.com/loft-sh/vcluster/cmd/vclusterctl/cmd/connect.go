@@ -16,7 +16,7 @@ import (
 	"github.com/loft-sh/loftctl/v3/cmd/loftctl/cmd/use"
 	proclient "github.com/loft-sh/loftctl/v3/pkg/client"
 	"github.com/loft-sh/loftctl/v3/pkg/vcluster"
-	"github.com/loft-sh/vcluster/pkg/pro"
+	"github.com/loft-sh/vcluster/pkg/procli"
 	"github.com/loft-sh/vcluster/pkg/util/clihelper"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -48,35 +48,28 @@ import (
 // ConnectCmd holds the cmd flags
 type ConnectCmd struct {
 	*flags.GlobalFlags
-
-	KubeConfigContextName string
-	KubeConfig            string
-	PodName               string
-	UpdateCurrent         bool
-	Print                 bool
-	BackgroundProxy       bool
-	LocalPort             int
-	Address               string
-
-	ServiceAccount            string
+	rawConfig                 clientcmdapi.Config
+	kubeClientConfig          clientcmd.ClientConfig
+	Log                       log.Logger
+	errorChan                 chan error
+	interruptChan             chan struct{}
+	restConfig                *rest.Config
+	kubeClient                *kubernetes.Clientset
 	ServiceAccountClusterRole string
+	PodName                   string
+	Address                   string
+	KubeConfigContextName     string
+	Server                    string
+	KubeConfig                string
+	Project                   string
+	ServiceAccount            string
+	LocalPort                 int
 	ServiceAccountExpiration  int
-
-	Server   string
-	Insecure bool
-
-	Project string
-
-	Log log.Logger
-
-	kubeClientConfig clientcmd.ClientConfig
-	kubeClient       *kubernetes.Clientset
-	restConfig       *rest.Config
-	rawConfig        clientcmdapi.Config
-
-	portForwarding bool
-	interruptChan  chan struct{}
-	errorChan      chan error
+	Print                     bool
+	UpdateCurrent             bool
+	BackgroundProxy           bool
+	portForwarding            bool
+	Insecure                  bool
 }
 
 // NewConnectCmd creates a new command
@@ -141,7 +134,7 @@ func (cmd *ConnectCmd) Run(ctx context.Context, args []string) error {
 		vClusterName = args[0]
 	}
 
-	proClient, err := pro.CreateProClient()
+	proClient, err := procli.CreateProClient()
 	if err != nil {
 		cmd.Log.Debugf("Error creating pro client: %v", err)
 	}
@@ -149,7 +142,7 @@ func (cmd *ConnectCmd) Run(ctx context.Context, args []string) error {
 	return cmd.Connect(ctx, proClient, vClusterName, args[1:])
 }
 
-func (cmd *ConnectCmd) Connect(ctx context.Context, proClient pro.Client, vClusterName string, command []string) error {
+func (cmd *ConnectCmd) Connect(ctx context.Context, proClient procli.Client, vClusterName string, command []string) error {
 	// validate flags
 	err := cmd.validateFlags()
 	if err != nil {
@@ -175,7 +168,7 @@ func (cmd *ConnectCmd) validateFlags() error {
 	return nil
 }
 
-func (cmd *ConnectCmd) connectPro(ctx context.Context, proClient proclient.Client, vCluster *pro.VirtualClusterInstanceProject, command []string) error {
+func (cmd *ConnectCmd) connectPro(ctx context.Context, proClient proclient.Client, vCluster *procli.VirtualClusterInstanceProject, command []string) error {
 	err := cmd.validateProFlags()
 	if err != nil {
 		return err
@@ -404,7 +397,7 @@ func (cmd *ConnectCmd) prepare(ctx context.Context, vCluster *find.VCluster) err
 	return nil
 }
 
-func (cmd *ConnectCmd) getVClusterProKubeConfig(ctx context.Context, proClient proclient.Client, vCluster *pro.VirtualClusterInstanceProject) (*clientcmdapi.Config, error) {
+func (cmd *ConnectCmd) getVClusterProKubeConfig(ctx context.Context, proClient proclient.Client, vCluster *procli.VirtualClusterInstanceProject) (*clientcmdapi.Config, error) {
 	contextOptions, err := use.CreateVirtualClusterInstanceOptions(ctx, proClient, "", vCluster.Project.Name, vCluster.VirtualCluster, false, false, cmd.Log)
 	if err != nil {
 		return nil, fmt.Errorf("prepare vCluster kube config: %w", err)
@@ -603,7 +596,7 @@ func (cmd *ConnectCmd) setServerIfExposed(ctx context.Context, vClusterName stri
 	err := wait.PollUntilContextTimeout(ctx, time.Second*2, time.Minute*5, true, func(ctx context.Context) (done bool, err error) {
 		// first check for load balancer service, look for the other service if it's not there
 		loadBalancerMissing := false
-		service, err := cmd.kubeClient.CoreV1().Services(cmd.Namespace).Get(ctx, translate.GetLoadBalancerSVCName(vClusterName), metav1.GetOptions{})
+		service, err := cmd.kubeClient.CoreV1().Services(cmd.Namespace).Get(ctx, vClusterName, metav1.GetOptions{})
 		if err != nil {
 			if kerrors.IsNotFound(err) {
 				loadBalancerMissing = true

@@ -1,4 +1,4 @@
-package manifests
+package deploy
 
 import (
 	"context"
@@ -13,15 +13,18 @@ import (
 	"strings"
 	"time"
 
+	vclusterconfig "github.com/loft-sh/vcluster/config"
+	"github.com/loft-sh/vcluster/pkg/config"
+	"github.com/loft-sh/vcluster/pkg/k0s"
 	"github.com/pkg/errors"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	"github.com/ghodss/yaml"
 	"github.com/loft-sh/vcluster/pkg/helm"
 	"github.com/loft-sh/vcluster/pkg/util/compress"
-	"github.com/loft-sh/vcluster/pkg/util/translate"
-
 	"github.com/loft-sh/vcluster/pkg/util/loghelper"
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,14 +34,11 @@ import (
 type InitObjectStatus string
 
 const (
-	InitChartsKey      = "charts"
-	InitManifestsKey   = "manifests"
-	InitManifestSuffix = "-init-manifests"
-
 	StatusFailed  InitObjectStatus = "Failed"
 	StatusSuccess InitObjectStatus = "Success"
 	StatusPending InitObjectStatus = "Pending"
-	StatusKey                      = "vcluster.loft.sh/status"
+
+	StatusKey = "vcluster.loft.sh/status"
 
 	DefaultTimeOut = 180 * time.Second
 	HelmWorkDir    = "/tmp"
@@ -47,45 +47,52 @@ const (
 	InstallError   = "InstallFailed"
 	UpgradeError   = "UpgradeFailed"
 	UninstallError = "UninstallFailed"
+
+	VClusterDeployConfigMap          = "vcluster-deploy"
+	VClusterDeployConfigMapNamespace = "kube-system"
 )
 
-type InitManifestsConfigMapReconciler struct {
+type Deployer struct {
 	Log loghelper.Logger
 
-	LocalClient    client.Client
 	VirtualManager ctrl.Manager
-
-	HelmClient helm.Client
+	HelmClient     helm.Client
 }
 
-func (r *InitManifestsConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
-	// TODO: implement better filtration through predicates
-	if req.Name != translate.VClusterName+InitManifestSuffix {
-		return ctrl.Result{}, nil
-	}
-
+func (r *Deployer) Apply(ctx context.Context, vConfig *config.VirtualClusterConfig) (result ctrl.Result, err error) {
 	// get config map
-	cm := &corev1.ConfigMap{}
-	err = r.LocalClient.Get(ctx, req.NamespacedName, cm)
-	if err != nil {
-		if kerrors.IsNotFound(err) {
+	configMap := &corev1.ConfigMap{}
+	err = r.VirtualManager.GetClient().Get(ctx, types.NamespacedName{Name: VClusterDeployConfigMap, Namespace: VClusterDeployConfigMapNamespace}, configMap)
+	if kerrors.IsNotFound(err) {
+		if vConfig.Experimental.Deploy.Manifests == "" && vConfig.Experimental.Deploy.ManifestsTemplate == "" && len(vConfig.Experimental.Deploy.Helm) == 0 {
 			return ctrl.Result{}, nil
 		}
 
+		configMap = &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      VClusterDeployConfigMap,
+				Namespace: VClusterDeployConfigMapNamespace,
+			},
+		}
+		err = r.VirtualManager.GetClient().Create(ctx, configMap)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("create deploy status config map: %w", err)
+		}
+	} else if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// patch the status to the configmap
-	oldConfigMap := cm.DeepCopy()
+	oldConfigMap := configMap.DeepCopy()
 	defer func() {
-		patchErr := r.UpdateConfigMap(ctx, err, result.Requeue, oldConfigMap, cm)
+		patchErr := r.UpdateConfigMap(ctx, err, result.Requeue, oldConfigMap, configMap)
 		if patchErr != nil && err == nil {
 			err = patchErr
 		}
 	}()
 
 	// process the init manifests
-	requeue, err := r.ProcessInitManifests(ctx, cm)
+	requeue, err := r.ProcessInitManifests(ctx, vConfig, configMap)
 	if err != nil {
 		return ctrl.Result{}, err
 	} else if requeue {
@@ -93,7 +100,7 @@ func (r *InitManifestsConfigMapReconciler) Reconcile(ctx context.Context, req ct
 	}
 
 	// process the helm charts
-	requeue, err = r.ProcessHelmChart(ctx, cm)
+	requeue, err = r.ProcessHelmChart(ctx, vConfig, configMap)
 	if err != nil {
 		return ctrl.Result{}, err
 	} else if requeue {
@@ -104,7 +111,7 @@ func (r *InitManifestsConfigMapReconciler) Reconcile(ctx context.Context, req ct
 	return ctrl.Result{}, nil
 }
 
-func (r *InitManifestsConfigMapReconciler) UpdateConfigMap(ctx context.Context, lastError error, requeue bool, oldConfigMap *corev1.ConfigMap, newConfigMap *corev1.ConfigMap) error {
+func (r *Deployer) UpdateConfigMap(ctx context.Context, lastError error, requeue bool, oldConfigMap *corev1.ConfigMap, newConfigMap *corev1.ConfigMap) error {
 	currentStatus := ParseStatus(newConfigMap)
 
 	// set phase initially to pending
@@ -161,7 +168,7 @@ func (r *InitManifestsConfigMapReconciler) UpdateConfigMap(ctx context.Context, 
 
 	// try patching the configmap
 	r.Log.Debugf("Patch init config map with: %s", string(rawPatch))
-	err = r.LocalClient.Patch(ctx, newConfigMap, client.RawPatch(patch.Type(), rawPatch))
+	err = r.VirtualManager.GetClient().Patch(ctx, newConfigMap, client.RawPatch(patch.Type(), rawPatch))
 	if err != nil {
 		r.Log.Errorf("error updating configmap status: %v", err)
 		return err
@@ -170,12 +177,20 @@ func (r *InitManifestsConfigMapReconciler) UpdateConfigMap(ctx context.Context, 
 	return nil
 }
 
-func (r *InitManifestsConfigMapReconciler) ProcessInitManifests(ctx context.Context, cm *corev1.ConfigMap) (bool, error) {
+func (r *Deployer) ProcessInitManifests(ctx context.Context, vConfig *config.VirtualClusterConfig, configMap *corev1.ConfigMap) (bool, error) {
 	var err error
-	manifests := cm.Data[InitManifestsKey]
+	manifests := vConfig.Experimental.Deploy.Manifests
+	if vConfig.Experimental.Deploy.ManifestsTemplate != "" {
+		templatedManifests, err := k0s.ExecTemplate(vConfig.Experimental.Deploy.ManifestsTemplate, vConfig.Name, vConfig.WorkloadTargetNamespace, &vConfig.Config)
+		if err != nil {
+			return false, fmt.Errorf("exec manifests template: %w", err)
+		}
+
+		manifests += "\n---\n" + string(templatedManifests)
+	}
 
 	// make array stable or otherwise order is random
-	status := ParseStatus(cm)
+	status := ParseStatus(configMap)
 
 	// get last applied manifests
 	lastAppliedManifests := ""
@@ -189,14 +204,14 @@ func (r *InitManifestsConfigMapReconciler) ProcessInitManifests(ctx context.Cont
 
 	// should skip?
 	if manifests == lastAppliedManifests {
-		return false, r.setManifestsStatus(cm, StatusSuccess, "", "")
+		return false, r.setManifestsStatus(configMap, StatusSuccess, "", "")
 	}
 
 	// apply manifests
 	err = ApplyGivenInitManifests(ctx, r.VirtualManager.GetClient(), r.VirtualManager.GetConfig(), manifests, lastAppliedManifests)
 	if err != nil {
 		r.Log.Errorf("error applying init manifests: %v", err)
-		_ = r.setManifestsStatus(cm, StatusFailed, InstallError, err.Error())
+		_ = r.setManifestsStatus(configMap, StatusFailed, InstallError, err.Error())
 		return false, err
 	}
 
@@ -209,27 +224,20 @@ func (r *InitManifestsConfigMapReconciler) ProcessInitManifests(ctx context.Cont
 
 	// update annotation
 	status.Manifests.LastAppliedManifests = compressedManifests
-	err = r.encodeStatus(cm, status)
+	err = r.encodeStatus(configMap, status)
 	if err != nil {
 		return false, err
 	}
-	return true, r.setManifestsStatus(cm, StatusSuccess, "", "")
+	return true, r.setManifestsStatus(configMap, StatusSuccess, "", "")
 }
 
-func (r *InitManifestsConfigMapReconciler) ProcessHelmChart(ctx context.Context, cm *corev1.ConfigMap) (bool, error) {
-	statusMap, err := r.getStatusMap(cm)
+func (r *Deployer) ProcessHelmChart(ctx context.Context, vConfig *config.VirtualClusterConfig, configMap *corev1.ConfigMap) (bool, error) {
+	statusMap, err := r.getStatusMap(configMap)
 	if err != nil {
 		return false, err
 	}
 
-	var charts []Chart
-	if cm.Data[InitChartsKey] != "" {
-		err = yaml.Unmarshal([]byte(cm.Data[InitChartsKey]), &charts)
-		if err != nil {
-			return false, err
-		}
-	}
-
+	charts := vConfig.Experimental.Deploy.Helm
 	for _, chart := range charts {
 		releaseName, releaseNamespace := r.getTargetRelease(chart)
 		r.Log.Debugf("processing helm chart for %s/%s", releaseNamespace, releaseName)
@@ -237,7 +245,7 @@ func (r *InitManifestsConfigMapReconciler) ProcessHelmChart(ctx context.Context,
 
 		err := r.pullChartArchive(ctx, chart)
 		if err != nil {
-			_ = r.setChartStatus(cm, &chart, StatusFailed, ChartPullError, err.Error())
+			_ = r.setChartStatus(configMap, &chart, StatusFailed, ChartPullError, err.Error())
 			return false, err
 		}
 
@@ -249,19 +257,19 @@ func (r *InitManifestsConfigMapReconciler) ProcessHelmChart(ctx context.Context,
 			r.Log.Debugf("release %s/%s already exists", releaseNamespace, releaseName)
 
 			// check if upgrade is needed
-			upgradedNeeded, err := r.checkIfUpgradeNeeded(cm, chart)
+			upgradedNeeded, err := r.checkIfUpgradeNeeded(configMap, chart)
 			if err != nil {
 				return false, err
 			} else if upgradedNeeded {
 				// initiate upgrade
 				err = r.initiateUpgrade(ctx, chart)
 				if err != nil {
-					_ = r.setChartStatus(cm, &chart, StatusFailed, UpgradeError, err.Error())
+					_ = r.setChartStatus(configMap, &chart, StatusFailed, UpgradeError, err.Error())
 					return false, err
 				}
 
 				// update last applied chart config
-				err = r.setChartStatusLastApplied(cm, &chart)
+				err = r.setChartStatusLastApplied(configMap, &chart)
 				if err != nil {
 					r.Log.Errorf("error updating config map with last applied chart annotation: %v", err)
 					return false, err
@@ -279,12 +287,12 @@ func (r *InitManifestsConfigMapReconciler) ProcessHelmChart(ctx context.Context,
 		err = r.initiateInstall(ctx, chart)
 		if err != nil {
 			r.Log.Errorf("error installing release %s/%s", releaseNamespace, releaseName)
-			_ = r.setChartStatus(cm, &chart, StatusFailed, InstallError, err.Error())
+			_ = r.setChartStatus(configMap, &chart, StatusFailed, InstallError, err.Error())
 			return false, err
 		}
 
 		// update last applied chart config
-		err = r.setChartStatusLastApplied(cm, &chart)
+		err = r.setChartStatusLastApplied(configMap, &chart)
 		if err != nil {
 			r.Log.Errorf("error updating config map with last applied chart annotation: %v", err)
 			return false, err
@@ -298,7 +306,7 @@ func (r *InitManifestsConfigMapReconciler) ProcessHelmChart(ctx context.Context,
 	if len(statusMap) > 0 {
 		r.Log.Debugf("following charts left in status map, should be deleted: %v", statusMap)
 		for _, chartStatus := range statusMap {
-			err := r.deleteHelmRelease(cm, chartStatus)
+			err := r.deleteHelmRelease(configMap, chartStatus)
 			if err != nil {
 				return false, errors.Wrap(err, "delete helm release")
 			}
@@ -308,7 +316,7 @@ func (r *InitManifestsConfigMapReconciler) ProcessHelmChart(ctx context.Context,
 	return false, nil
 }
 
-func (r *InitManifestsConfigMapReconciler) checkIfUpgradeNeeded(cm *corev1.ConfigMap, chart Chart) (bool, error) {
+func (r *Deployer) checkIfUpgradeNeeded(cm *corev1.ConfigMap, chart vclusterconfig.ExperimentalDeployHelm) (bool, error) {
 	name, namespace := r.getTargetRelease(chart)
 
 	// find chart status
@@ -327,7 +335,7 @@ func (r *InitManifestsConfigMapReconciler) checkIfUpgradeNeeded(cm *corev1.Confi
 	return true, nil
 }
 
-func (r *InitManifestsConfigMapReconciler) initiateUpgrade(ctx context.Context, chart Chart) error {
+func (r *Deployer) initiateUpgrade(ctx context.Context, chart vclusterconfig.ExperimentalDeployHelm) error {
 	name, namespace := r.getTargetRelease(chart)
 	path, err := r.findChart(chart)
 	if err != nil {
@@ -383,14 +391,14 @@ func getTarballPath(helmWorkDir, repo, name, version string) (tarballPath, tarba
 	return tarballPath, tarballDir
 }
 
-func (r *InitManifestsConfigMapReconciler) findChart(chart Chart) (string, error) {
-	tarballPath, tarballDir := getTarballPath(HelmWorkDir, chart.Repo, chart.Name, chart.Version)
+func (r *Deployer) findChart(chart vclusterconfig.ExperimentalDeployHelm) (string, error) {
+	tarballPath, tarballDir := getTarballPath(HelmWorkDir, chart.Chart.Repo, chart.Chart.Name, chart.Chart.Version)
 	// if version specified, look for specific file
-	if chart.Version != "" {
+	if chart.Chart.Version != "" {
 		pathsToTry := []string{tarballPath}
 		// try with alternate names as well
-		if chart.Version[0] != 'v' {
-			tarballPathWithV, _ := getTarballPath(HelmWorkDir, chart.Repo, chart.Name, fmt.Sprintf("v%s", chart.Version))
+		if chart.Chart.Version[0] != 'v' {
+			tarballPathWithV, _ := getTarballPath(HelmWorkDir, chart.Chart.Repo, chart.Chart.Name, fmt.Sprintf("v%s", chart.Chart.Version))
 			pathsToTry = append(pathsToTry, tarballPathWithV)
 		}
 		for _, path := range pathsToTry {
@@ -410,7 +418,7 @@ func (r *InitManifestsConfigMapReconciler) findChart(chart Chart) (string, error
 			return "", err
 		}
 		for _, f := range files {
-			if strings.HasPrefix(f.Name(), chart.Name+"-") {
+			if strings.HasPrefix(f.Name(), chart.Chart.Name+"-") {
 				return filepath.Join(tarballDir, f.Name()), nil
 			}
 		}
@@ -419,7 +427,7 @@ func (r *InitManifestsConfigMapReconciler) findChart(chart Chart) (string, error
 	return "", nil
 }
 
-func (r *InitManifestsConfigMapReconciler) initiateInstall(ctx context.Context, chart Chart) error {
+func (r *Deployer) initiateInstall(ctx context.Context, chart vclusterconfig.ExperimentalDeployHelm) error {
 	// initiate install
 	name, namespace := r.getTargetRelease(chart)
 	path, err := r.findChart(chart)
@@ -461,7 +469,7 @@ func (r *InitManifestsConfigMapReconciler) initiateInstall(ctx context.Context, 
 	return nil
 }
 
-func (r *InitManifestsConfigMapReconciler) getHashedConfig(chart Chart) (string, error) {
+func (r *Deployer) getHashedConfig(chart vclusterconfig.ExperimentalDeployHelm) (string, error) {
 	rawData, err := json.Marshal(chart)
 	if err != nil {
 		return "", err
@@ -470,7 +478,7 @@ func (r *InitManifestsConfigMapReconciler) getHashedConfig(chart Chart) (string,
 	return fmt.Sprintf("%x", md5.Sum(rawData)), nil
 }
 
-func (r *InitManifestsConfigMapReconciler) releaseExists(chart Chart) (bool, error) {
+func (r *Deployer) releaseExists(chart vclusterconfig.ExperimentalDeployHelm) (bool, error) {
 	name, namespace := r.getTargetRelease(chart)
 	ok, err := r.HelmClient.Exists(name, namespace)
 	if err != nil {
@@ -484,7 +492,7 @@ func (r *InitManifestsConfigMapReconciler) releaseExists(chart Chart) (bool, err
 	return false, nil
 }
 
-func (r *InitManifestsConfigMapReconciler) pullChartArchive(ctx context.Context, chart Chart) error {
+func (r *Deployer) pullChartArchive(ctx context.Context, chart vclusterconfig.ExperimentalDeployHelm) error {
 	tarballPath, err := r.findChart(chart)
 	if err != nil {
 		return err
@@ -492,7 +500,7 @@ func (r *InitManifestsConfigMapReconciler) pullChartArchive(ctx context.Context,
 
 	// check if tarball exists
 	if tarballPath == "" {
-		tarballPath, tarballDir := getTarballPath(HelmWorkDir, chart.Repo, chart.Name, chart.Version)
+		tarballPath, tarballDir := getTarballPath(HelmWorkDir, chart.Chart.Repo, chart.Chart.Name, chart.Chart.Version)
 		err := os.MkdirAll(tarballDir, 0755)
 		if err != nil {
 			return err
@@ -508,29 +516,29 @@ func (r *InitManifestsConfigMapReconciler) pullChartArchive(ctx context.Context,
 				return errors.Wrap(err, "write bundle to file")
 			}
 		} else {
-			helmErr := r.HelmClient.Pull(ctx, chart.Name, helm.UpgradeOptions{
-				Chart:    chart.Name,
-				Repo:     chart.Repo,
-				Insecure: chart.Insecure,
-				Version:  chart.Version,
-				Username: chart.Username,
-				Password: chart.Password,
+			helmErr := r.HelmClient.Pull(ctx, chart.Chart.Name, helm.UpgradeOptions{
+				Chart:    chart.Chart.Name,
+				Repo:     chart.Chart.Repo,
+				Insecure: chart.Chart.Insecure,
+				Version:  chart.Chart.Version,
+				Username: chart.Chart.Username,
+				Password: chart.Chart.Password,
 
 				WorkDir: tarballDir,
 			})
 			if helmErr != nil {
-				r.Log.Errorf("unable to pull chart %s: %v", chart.Name, helmErr)
+				r.Log.Errorf("unable to pull chart %s: %v", chart.Chart.Name, helmErr)
 				return helmErr
 			}
 
-			r.Log.Debugf("successfully pulled chart %s", chart.Name)
+			r.Log.Debugf("successfully pulled chart %s", chart.Chart.Name)
 		}
 	}
 
 	return nil
 }
 
-func (r *InitManifestsConfigMapReconciler) parseTimeout(chart Chart) time.Duration {
+func (r *Deployer) parseTimeout(chart vclusterconfig.ExperimentalDeployHelm) time.Duration {
 	t := chart.Timeout
 	timeout, err := time.ParseDuration(t)
 	if err != nil {
@@ -542,7 +550,7 @@ func (r *InitManifestsConfigMapReconciler) parseTimeout(chart Chart) time.Durati
 	return timeout
 }
 
-func (r *InitManifestsConfigMapReconciler) rollbackOrUninstall(ctx context.Context, chartName, namespace string) error {
+func (r *Deployer) rollbackOrUninstall(ctx context.Context, chartName, namespace string) error {
 	output, err := r.HelmClient.Status(ctx, chartName, namespace)
 	if err != nil {
 		r.Log.Errorf("error getting helm status: %v", err)
@@ -570,20 +578,20 @@ func (r *InitManifestsConfigMapReconciler) rollbackOrUninstall(ctx context.Conte
 	return nil
 }
 
-func (r *InitManifestsConfigMapReconciler) getTargetRelease(chart Chart) (string, string) {
-	name := chart.Name
+func (r *Deployer) getTargetRelease(chart vclusterconfig.ExperimentalDeployHelm) (string, string) {
+	name := chart.Chart.Name
 	namespace := corev1.NamespaceDefault
-	if chart.ReleaseName != "" {
-		name = chart.ReleaseName
+	if chart.Release.Name != "" {
+		name = chart.Release.Name
 	}
-	if chart.ReleaseNamespace != "" {
-		namespace = chart.ReleaseNamespace
+	if chart.Release.Namespace != "" {
+		namespace = chart.Release.Namespace
 	}
 
 	return name, namespace
 }
 
-func (r *InitManifestsConfigMapReconciler) getStatusMap(cm *corev1.ConfigMap) (map[string]ChartStatus, error) {
+func (r *Deployer) getStatusMap(cm *corev1.ConfigMap) (map[string]ChartStatus, error) {
 	statusMap := make(map[string]ChartStatus)
 	status := ParseStatus(cm)
 	for _, status := range status.Charts {
@@ -593,7 +601,7 @@ func (r *InitManifestsConfigMapReconciler) getStatusMap(cm *corev1.ConfigMap) (m
 	return statusMap, nil
 }
 
-func (r *InitManifestsConfigMapReconciler) encodeStatus(cm *corev1.ConfigMap, status *Status) error {
+func (r *Deployer) encodeStatus(cm *corev1.ConfigMap, status *Status) error {
 	if cm.Annotations == nil {
 		cm.Annotations = map[string]string{}
 	}
@@ -620,7 +628,7 @@ func ParseStatus(cm *corev1.ConfigMap) *Status {
 	return status
 }
 
-func (r *InitManifestsConfigMapReconciler) setManifestsStatus(cm *corev1.ConfigMap, phase InitObjectStatus, reason string, message string) error {
+func (r *Deployer) setManifestsStatus(cm *corev1.ConfigMap, phase InitObjectStatus, reason string, message string) error {
 	status := ParseStatus(cm)
 	status.Manifests.Phase = string(phase)
 	status.Manifests.Reason = reason
@@ -628,7 +636,7 @@ func (r *InitManifestsConfigMapReconciler) setManifestsStatus(cm *corev1.ConfigM
 	return r.encodeStatus(cm, status)
 }
 
-func (r *InitManifestsConfigMapReconciler) setChartStatusLastApplied(cm *corev1.ConfigMap, chart *Chart) error {
+func (r *Deployer) setChartStatusLastApplied(cm *corev1.ConfigMap, chart *vclusterconfig.ExperimentalDeployHelm) error {
 	status := ParseStatus(cm)
 
 	// get release name & namespace
@@ -661,7 +669,7 @@ func (r *InitManifestsConfigMapReconciler) setChartStatusLastApplied(cm *corev1.
 	return r.encodeStatus(cm, status)
 }
 
-func (r *InitManifestsConfigMapReconciler) setChartStatus(cm *corev1.ConfigMap, chart *Chart, phase InitObjectStatus, reason string, message string) error {
+func (r *Deployer) setChartStatus(cm *corev1.ConfigMap, chart *vclusterconfig.ExperimentalDeployHelm, phase InitObjectStatus, reason string, message string) error {
 	status := ParseStatus(cm)
 
 	// get release name & namespace
@@ -691,7 +699,7 @@ func (r *InitManifestsConfigMapReconciler) setChartStatus(cm *corev1.ConfigMap, 
 	return r.encodeStatus(cm, status)
 }
 
-func (r *InitManifestsConfigMapReconciler) popFromStatus(cm *corev1.ConfigMap, chartStatus ChartStatus) error {
+func (r *Deployer) popFromStatus(cm *corev1.ConfigMap, chartStatus ChartStatus) error {
 	status := ParseStatus(cm)
 
 	found := -1
@@ -706,13 +714,17 @@ func (r *InitManifestsConfigMapReconciler) popFromStatus(cm *corev1.ConfigMap, c
 	return r.encodeStatus(cm, status)
 }
 
-func (r *InitManifestsConfigMapReconciler) deleteHelmRelease(cm *corev1.ConfigMap, chartStatus ChartStatus) error {
+func (r *Deployer) deleteHelmRelease(cm *corev1.ConfigMap, chartStatus ChartStatus) error {
 	err := r.HelmClient.Delete(chartStatus.Name, chartStatus.Namespace)
 	if err != nil {
 		r.Log.Infof("error deleting helm release %s/%s: %v", chartStatus.Namespace, chartStatus.Name, err)
-		return r.setChartStatus(cm, &Chart{
-			Name:             chartStatus.Name,
-			ReleaseNamespace: chartStatus.Namespace,
+		return r.setChartStatus(cm, &vclusterconfig.ExperimentalDeployHelm{
+			Chart: vclusterconfig.ExperimentalDeployHelmChart{
+				Name: chartStatus.Name,
+			},
+			Release: vclusterconfig.ExperimentalDeployHelmRelease{
+				Namespace: chartStatus.Namespace,
+			},
 		}, StatusFailed, UninstallError, err.Error())
 	}
 

@@ -6,17 +6,16 @@ import (
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
 	syncertypes "github.com/loft-sh/vcluster/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlmanager "sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 type Options struct {
-	// NewClient allows a user to define how to create a client.
-	NewClient client.NewClientFunc
+	// ModifyVirtualManager modifies options for the virtual manager
+	ModifyVirtualManager func(options *ctrlmanager.Options)
 
-	// NewCache is the function that will create the cache to be used
-	// by the manager. If not set this will use the default new cache function.
-	NewCache cache.NewCacheFunc
+	// ModifyHostManager modifies options for the host manager
+	ModifyHostManager func(options *ctrlmanager.Options)
 }
 
 type Manager interface {

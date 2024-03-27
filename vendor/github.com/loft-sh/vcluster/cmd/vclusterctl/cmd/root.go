@@ -10,7 +10,7 @@ import (
 	cmdpro "github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/pro"
 	cmdtelemetry "github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/telemetry"
 	"github.com/loft-sh/vcluster/cmd/vclusterctl/flags"
-	"github.com/loft-sh/vcluster/pkg/pro"
+	"github.com/loft-sh/vcluster/pkg/procli"
 	"github.com/loft-sh/vcluster/pkg/telemetry"
 	"github.com/loft-sh/vcluster/pkg/upgrade"
 	"github.com/sirupsen/logrus"
@@ -24,7 +24,7 @@ func NewRootCmd(log log.Logger) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Short:         "Welcome to vcluster!",
-		PersistentPreRun: func(cobraCmd *cobra.Command, args []string) {
+		PersistentPreRun: func(_ *cobra.Command, _ []string) {
 			if globalFlags.Silent {
 				log.SetLevel(logrus.FatalLevel)
 			} else if globalFlags.Debug {
@@ -48,7 +48,7 @@ func Execute() {
 	}
 
 	// start telemetry
-	telemetry.Start(true)
+	telemetry.StartCLI()
 
 	// start command
 	log := log.GetInstance()
@@ -134,6 +134,6 @@ func BuildRoot(log log.Logger) (*cobra.Command, error) {
 }
 
 func recordAndFlush(err error) {
-	telemetry.Collector.RecordCLI(pro.Self, err)
-	telemetry.Collector.Flush()
+	telemetry.CollectorCLI.RecordCLI(procli.Self, err)
+	telemetry.CollectorCLI.Flush()
 }

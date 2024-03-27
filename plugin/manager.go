@@ -9,9 +9,11 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/loft-sh/log/logr"
+	config2 "github.com/loft-sh/vcluster/config"
+	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
-	"github.com/loft-sh/vcluster/pkg/options"
+	"github.com/loft-sh/vcluster/pkg/plugin"
 	"github.com/loft-sh/vcluster/pkg/plugin/types"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
 	"github.com/loft-sh/vcluster/pkg/scheme"
@@ -19,11 +21,12 @@ import (
 	syncertypes "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 	contextutil "github.com/loft-sh/vcluster/pkg/util/context"
-	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/pkg/errors"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlmanager "sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 func newManager() Manager {
@@ -45,6 +48,8 @@ type manager struct {
 	syncers []syncertypes.Base
 
 	proConfig v2.InitConfigPro
+
+	options Options
 }
 
 func (m *manager) UnmarshalConfig(into interface{}) error {
@@ -67,7 +72,7 @@ func (m *manager) Init() (*synccontext.RegisterContext, error) {
 	return m.InitWithOptions(Options{})
 }
 
-func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, error) {
+func (m *manager) InitWithOptions(options Options) (*synccontext.RegisterContext, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
 
@@ -75,6 +80,12 @@ func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, e
 		return nil, fmt.Errorf("plugin manager is already initialized")
 	}
 	m.initialized = true
+	m.options = options
+
+	// set code globals
+	plugin.IsPlugin = true
+	setup.NewLocalManager = m.newLocalManager
+	setup.NewVirtualManager = m.newVirtualManager
 
 	// create a new plugin server
 	var err error
@@ -119,34 +130,40 @@ func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, e
 	ctx := klog.NewContext(context.Background(), logger)
 
 	// now create register context
-	virtualClusterOptions := &options.VirtualClusterOptions{}
-	err = json.Unmarshal(initConfig.Options, virtualClusterOptions)
+	virtualClusterConfig := &config.VirtualClusterConfig{}
+	err = json.Unmarshal(initConfig.Config, virtualClusterConfig)
 	if err != nil {
-		return nil, errors.Wrap(err, "unmarshal vcluster options")
+		return nil, errors.Wrap(err, "unmarshal vCluster config")
 	}
 
-	// set vcluster name correctly
-	if virtualClusterOptions.Name != "" {
-		translate.VClusterName = virtualClusterOptions.Name
+	// parse workload & control plane client
+	virtualClusterConfig.WorkloadConfig, err = bytesToRestConfig(initConfig.WorkloadConfig)
+	if err != nil {
+		return nil, fmt.Errorf("parse workload config: %w", err)
+	}
+	virtualClusterConfig.ControlPlaneConfig, err = bytesToRestConfig(initConfig.ControlPlaneConfig)
+	if err != nil {
+		return nil, fmt.Errorf("parse control plane config: %w", err)
+	}
+
+	// we disable plugin loading
+	virtualClusterConfig.Plugin = map[string]config2.Plugin{}
+	virtualClusterConfig.Plugins = map[string]config2.Plugins{}
+
+	// init virtual cluster config
+	err = setup.InitConfig(virtualClusterConfig)
+	if err != nil {
+		return nil, fmt.Errorf("init config: %w", err)
 	}
 
 	// parse clients
-	physicalConfig, err := clientcmd.NewClientConfigFromBytes(initConfig.PhysicalClusterConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse physical kube config")
-	}
-	restPhysicalConfig, err := physicalConfig.ClientConfig()
-	if err != nil {
-		return nil, errors.Wrap(err, "parse physical kube config rest")
-	}
 	m.syncerConfig, err = clientcmd.NewClientConfigFromBytes(initConfig.SyncerConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse syncer kube config")
 	}
 
-	// we disable plugin loading and create a new controller context
-	virtualClusterOptions.DisablePlugins = true
-	controllerCtx, err := setup.NewControllerContext(ctx, virtualClusterOptions, initConfig.CurrentNamespace, restPhysicalConfig, scheme.Scheme, opts.NewClient, opts.NewClient)
+	// create new controller context
+	controllerCtx, err := setup.NewControllerContext(ctx, virtualClusterConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create controller context: %w", err)
 	}
@@ -220,7 +237,8 @@ func (m *manager) start() error {
 	go func() {
 		err := m.context.PhysicalManager.Start(m.context.Context)
 		if err != nil {
-			panic(err)
+			klog.Errorf("Starting physical manager: %v", err)
+			Exit(1)
 		}
 	}()
 
@@ -228,7 +246,8 @@ func (m *manager) start() error {
 	go func() {
 		err := m.context.VirtualManager.Start(m.context.Context)
 		if err != nil {
-			panic(err)
+			klog.Errorf("Starting virtual manager: %v", err)
+			Exit(1)
 		}
 	}()
 
@@ -241,9 +260,9 @@ func (m *manager) start() error {
 		m.context.Context,
 		m.context.CurrentNamespaceClient,
 		m.context.CurrentNamespace,
-		m.context.Options.TargetNamespace,
-		m.context.Options.SetOwner,
-		m.context.Options.ServiceName,
+		m.context.Config.WorkloadTargetNamespace,
+		m.context.Config.Experimental.SyncSettings.SetOwner,
+		m.context.Config.WorkloadService,
 	)
 	if err != nil {
 		return fmt.Errorf("error in setting owner reference %v", err)
@@ -377,4 +396,35 @@ func (m *manager) findAllHooks() (map[types.VersionKindType][]ClientHook, error)
 	}
 
 	return hooks, nil
+}
+
+func (m *manager) newLocalManager(config *rest.Config, options ctrlmanager.Options) (ctrlmanager.Manager, error) {
+	options.Metrics.BindAddress = "0"
+	if m.options.ModifyHostManager != nil {
+		m.options.ModifyHostManager(&options)
+	}
+
+	return ctrlmanager.New(config, options)
+}
+
+func (m *manager) newVirtualManager(config *rest.Config, options ctrlmanager.Options) (ctrlmanager.Manager, error) {
+	options.Metrics.BindAddress = "0"
+	if m.options.ModifyVirtualManager != nil {
+		m.options.ModifyVirtualManager(&options)
+	}
+
+	return ctrlmanager.New(config, options)
+}
+
+func bytesToRestConfig(rawBytes []byte) (*rest.Config, error) {
+	if len(rawBytes) == 0 {
+		return nil, fmt.Errorf("kube client config is empty")
+	}
+
+	parsedConfig, err := clientcmd.NewClientConfigFromBytes(rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse kube config: %w", err)
+	}
+
+	return parsedConfig.ClientConfig()
 }
