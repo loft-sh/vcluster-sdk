@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/loft-sh/vcluster/pkg/options"
+	vclusterconfig "github.com/loft-sh/vcluster/config"
+	"github.com/loft-sh/vcluster/pkg/config"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
-	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/constants"
 	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
@@ -33,13 +33,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func CreateImporters(ctx *options.ControllerContext, cfg *config.Config) error {
+func CreateImporters(ctx *config.ControllerContext) error {
+	cfg := ctx.Config.Experimental.GenericSync
 	if len(cfg.Imports) == 0 {
 		return nil
 	}
 
 	registerCtx := util.ToRegisterContext(ctx)
-	if !registerCtx.Options.MultiNamespaceMode {
+	if !registerCtx.Config.Experimental.MultiNamespaceMode.Enabled {
 		return fmt.Errorf("invalid configuration, 'import' type sync of the generic CRDs is allowed only in the multi-namespace mode")
 	}
 
@@ -84,7 +85,7 @@ func CreateImporters(ctx *options.ControllerContext, cfg *config.Config) error {
 	return nil
 }
 
-func createImporter(ctx *synccontext.RegisterContext, config *config.Import, gvkRegister GVKRegister) (syncertypes.Syncer, error) {
+func createImporter(ctx *synccontext.RegisterContext, config *vclusterconfig.Import, gvkRegister GVKRegister) (syncertypes.Syncer, error) {
 	gvk := schema.FromAPIVersionAndKind(config.APIVersion, config.Kind)
 	controllerID := fmt.Sprintf("%s/%s/GenericImport", strings.ToLower(gvk.Kind), strings.ToLower(gvk.GroupVersion().String()))
 
@@ -114,13 +115,12 @@ func createImporter(ctx *synccontext.RegisterContext, config *config.Import, gvk
 
 type importer struct {
 	translator.Translator
-	patcher       *patcher
-	gvk           schema.GroupVersionKind
-	config        *config.Import
 	virtualClient client.Client
-	name          string
-
+	patcher       *patcher
+	config        *vclusterconfig.Import
 	syncerOptions *syncertypes.Options
+	gvk           schema.GroupVersionKind
+	name          string
 }
 
 func (s *importer) Resource() client.Object {
@@ -204,7 +204,7 @@ func (s *importer) SyncToVirtual(ctx *synccontext.SyncContext, pObj client.Objec
 		return s.TranslateMetadata(ctx.Context, vObj), nil
 	}, &hostToVirtualImportNameResolver{virtualClient: s.virtualClient, ctx: ctx.Context})
 	if err != nil {
-		//TODO: add eventRecorder?
+		// TODO: add eventRecorder?
 		// s.EventRecorder().Eventf(vObj, "Warning", "SyncError", "Error syncing to virtual cluster: %v", err)
 		return ctrl.Result{}, fmt.Errorf("error applying patches: %w", err)
 	}
@@ -443,18 +443,23 @@ type hostToVirtualImportNameResolver struct {
 func (r *hostToVirtualImportNameResolver) TranslateName(name string, _ *regexp.Regexp, _ string) (string, error) {
 	return name, nil
 }
+
 func (r *hostToVirtualImportNameResolver) TranslateNameWithNamespace(name string, _ string, _ *regexp.Regexp, _ string) (string, error) {
 	return name, nil
 }
+
 func (r *hostToVirtualImportNameResolver) TranslateLabelKey(key string) (string, error) {
 	return key, nil
 }
+
 func (r *hostToVirtualImportNameResolver) TranslateLabelExpressionsSelector(selector *metav1.LabelSelector) (*metav1.LabelSelector, error) {
 	return selector, nil
 }
+
 func (r *hostToVirtualImportNameResolver) TranslateLabelSelector(selector map[string]string) (map[string]string, error) {
 	return selector, nil
 }
+
 func (r *hostToVirtualImportNameResolver) TranslateNamespaceRef(namespace string) (string, error) {
 	vNamespace := (&corev1.Namespace{}).DeepCopyObject().(client.Object)
 	err := clienthelper.GetByIndex(r.ctx, r.virtualClient, vNamespace, constants.IndexByPhysicalName, namespace)

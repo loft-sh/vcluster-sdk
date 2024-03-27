@@ -9,9 +9,10 @@ import (
 
 	"github.com/ghodss/yaml"
 	"github.com/loft-sh/log/logr"
+	config2 "github.com/loft-sh/vcluster/config"
+	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
-	"github.com/loft-sh/vcluster/pkg/options"
 	"github.com/loft-sh/vcluster/pkg/plugin/types"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
 	"github.com/loft-sh/vcluster/pkg/scheme"
@@ -19,8 +20,8 @@ import (
 	syncertypes "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 	contextutil "github.com/loft-sh/vcluster/pkg/util/context"
-	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/pkg/errors"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -67,7 +68,7 @@ func (m *manager) Init() (*synccontext.RegisterContext, error) {
 	return m.InitWithOptions(Options{})
 }
 
-func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, error) {
+func (m *manager) InitWithOptions(_ Options) (*synccontext.RegisterContext, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
 
@@ -119,34 +120,40 @@ func (m *manager) InitWithOptions(opts Options) (*synccontext.RegisterContext, e
 	ctx := klog.NewContext(context.Background(), logger)
 
 	// now create register context
-	virtualClusterOptions := &options.VirtualClusterOptions{}
-	err = json.Unmarshal(initConfig.Options, virtualClusterOptions)
+	virtualClusterConfig := &config.VirtualClusterConfig{}
+	err = json.Unmarshal(initConfig.Options, virtualClusterConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "unmarshal vcluster options")
 	}
 
-	// set vcluster name correctly
-	if virtualClusterOptions.Name != "" {
-		translate.VClusterName = virtualClusterOptions.Name
+	// parse workload & control plane client
+	virtualClusterConfig.WorkloadConfig, err = bytesToRestConfig(initConfig.WorkloadConfig)
+	if err != nil {
+		return nil, fmt.Errorf("parse workload config: %w", err)
+	}
+	virtualClusterConfig.ControlPlaneConfig, err = bytesToRestConfig(initConfig.ControlPlaneConfig)
+	if err != nil {
+		return nil, fmt.Errorf("parse control plane config: %w", err)
+	}
+
+	// init virtual cluster config
+	err = setup.InitConfig(virtualClusterConfig)
+	if err != nil {
+		return nil, fmt.Errorf("init config: %w", err)
 	}
 
 	// parse clients
-	physicalConfig, err := clientcmd.NewClientConfigFromBytes(initConfig.PhysicalClusterConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse physical kube config")
-	}
-	restPhysicalConfig, err := physicalConfig.ClientConfig()
-	if err != nil {
-		return nil, errors.Wrap(err, "parse physical kube config rest")
-	}
 	m.syncerConfig, err = clientcmd.NewClientConfigFromBytes(initConfig.SyncerConfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse syncer kube config")
 	}
 
-	// we disable plugin loading and create a new controller context
-	virtualClusterOptions.DisablePlugins = true
-	controllerCtx, err := setup.NewControllerContext(ctx, virtualClusterOptions, initConfig.CurrentNamespace, restPhysicalConfig, scheme.Scheme, opts.NewClient, opts.NewClient)
+	// we disable plugin loading
+	virtualClusterConfig.Plugin = map[string]config2.Plugin{}
+	virtualClusterConfig.Plugins = map[string]config2.Plugins{}
+
+	// create new controller context
+	controllerCtx, err := setup.NewControllerContext(ctx, virtualClusterConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create controller context: %w", err)
 	}
@@ -241,9 +248,9 @@ func (m *manager) start() error {
 		m.context.Context,
 		m.context.CurrentNamespaceClient,
 		m.context.CurrentNamespace,
-		m.context.Options.TargetNamespace,
-		m.context.Options.SetOwner,
-		m.context.Options.ServiceName,
+		m.context.Config.WorkloadTargetNamespace,
+		m.context.Config.Experimental.SyncSettings.SetOwner,
+		m.context.Config.WorkloadService,
 	)
 	if err != nil {
 		return fmt.Errorf("error in setting owner reference %v", err)
@@ -377,4 +384,13 @@ func (m *manager) findAllHooks() (map[types.VersionKindType][]ClientHook, error)
 	}
 
 	return hooks, nil
+}
+
+func bytesToRestConfig(rawBytes []byte) (*rest.Config, error) {
+	parsedConfig, err := clientcmd.NewClientConfigFromBytes(rawBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse kube config: %w", err)
+	}
+
+	return parsedConfig.ClientConfig()
 }

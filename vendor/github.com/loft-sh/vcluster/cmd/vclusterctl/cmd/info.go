@@ -5,7 +5,7 @@ import (
 	"runtime"
 
 	"github.com/loft-sh/log"
-	"github.com/loft-sh/vcluster/pkg/pro"
+	"github.com/loft-sh/vcluster/pkg/procli"
 	"github.com/loft-sh/vcluster/pkg/telemetry"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
@@ -36,14 +36,14 @@ vcluster info
 	`,
 		Args:   cobra.NoArgs,
 		Hidden: true,
-		RunE: func(cobraCmd *cobra.Command, args []string) error {
+		RunE: func(cobraCmd *cobra.Command, _ []string) error {
 			infos := cliInfo{
 				Version:   cobraCmd.Root().Version,
 				OS:        runtime.GOOS,
 				Arch:      runtime.GOARCH,
 				MachineID: telemetry.GetMachineID(log.GetInstance()),
 			}
-			proClient, err := pro.CreateProClient()
+			proClient, err := procli.CreateProClient()
 			if err == nil {
 				infos.InstanceID = proClient.Self().Status.InstanceID
 			}

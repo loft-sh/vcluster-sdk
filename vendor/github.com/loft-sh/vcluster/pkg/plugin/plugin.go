@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/loft-sh/vcluster/pkg/options"
+	"github.com/loft-sh/vcluster/pkg/config"
 	plugintypes "github.com/loft-sh/vcluster/pkg/plugin/types"
 	pluginv1 "github.com/loft-sh/vcluster/pkg/plugin/v1"
 	pluginv2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
@@ -30,18 +30,21 @@ type manager struct {
 
 func (m *manager) Start(
 	ctx context.Context,
-	currentNamespace, targetNamespace string,
 	virtualKubeConfig *rest.Config,
-	physicalKubeConfig *rest.Config,
 	syncerConfig *clientcmdapi.Config,
-	options *options.VirtualClusterOptions,
+	vConfig *config.VirtualClusterConfig,
 ) error {
-	err := m.legacyManager.Start(ctx, currentNamespace, targetNamespace, virtualKubeConfig, physicalKubeConfig, syncerConfig, options)
+	legacyOptions, err := vConfig.LegacyOptions()
+	if err != nil {
+		return fmt.Errorf("build legacy options: %w", err)
+	}
+
+	err = m.legacyManager.Start(ctx, vConfig.WorkloadNamespace, vConfig.WorkloadTargetNamespace, virtualKubeConfig, vConfig.WorkloadConfig, syncerConfig, legacyOptions)
 	if err != nil {
 		return fmt.Errorf("start legacy plugins: %w", err)
 	}
 
-	err = m.pluginManager.Start(ctx, currentNamespace, physicalKubeConfig, syncerConfig, options)
+	err = m.pluginManager.Start(ctx, syncerConfig, vConfig)
 	if err != nil {
 		return fmt.Errorf("start plugins: %w", err)
 	}

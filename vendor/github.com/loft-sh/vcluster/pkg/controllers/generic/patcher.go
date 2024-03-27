@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/loft-sh/vcluster/pkg/config"
+	"github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/log"
 	"github.com/loft-sh/vcluster/pkg/patches"
 	"github.com/pkg/errors"
@@ -16,16 +16,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-var (
-	fieldManager = "vcluster-syncer"
-)
+var fieldManager = "vcluster-syncer"
 
 type patcher struct {
-	fromClient client.Client
-	toClient   client.Client
-
-	statusIsSubresource bool
+	fromClient          client.Client
+	toClient            client.Client
 	log                 log.Logger
+	statusIsSubresource bool
 }
 
 func (s *patcher) ApplyPatches(ctx context.Context, fromObj, toObj client.Object, patchesConfig, reversePatchesConfig []*config.Patch, translateMetadata func(vObj client.Object) (client.Object, error), nameResolver patches.NameResolver) (client.Object, error) {
