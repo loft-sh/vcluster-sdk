@@ -1,8 +1,117 @@
-package options
+package config
 
-import (
-	"github.com/spf13/pflag"
+const (
+	DefaultHostsRewriteImage = "library/alpine:3.13.1"
 )
+
+// LegacyVirtualClusterOptions holds the cmd flags
+type LegacyVirtualClusterOptions struct {
+	// PRO Options
+	ProOptions LegacyVirtualClusterProOptions `json:",inline"`
+
+	ServerCaCert        string   `json:"serverCaCert,omitempty"`
+	ServerCaKey         string   `json:"serverCaKey,omitempty"`
+	TLSSANs             []string `json:"tlsSans,omitempty"`
+	RequestHeaderCaCert string   `json:"requestHeaderCaCert,omitempty"`
+	ClientCaCert        string   `json:"clientCaCert,omitempty"`
+	KubeConfigPath      string   `json:"kubeConfig,omitempty"`
+
+	KubeConfigContextName     string   `json:"kubeConfigContextName,omitempty"`
+	KubeConfigSecret          string   `json:"kubeConfigSecret,omitempty"`
+	KubeConfigSecretNamespace string   `json:"kubeConfigSecretNamespace,omitempty"`
+	KubeConfigServer          string   `json:"kubeConfigServer,omitempty"`
+	Tolerations               []string `json:"tolerations,omitempty"`
+
+	BindAddress string `json:"bindAddress,omitempty"`
+	Port        int    `json:"port,omitempty"`
+
+	Name string `json:"name,omitempty"`
+
+	TargetNamespace string `json:"targetNamespace,omitempty"`
+	ServiceName     string `json:"serviceName,omitempty"`
+
+	SetOwner bool `json:"setOwner,omitempty"`
+
+	SyncAllNodes        bool `json:"syncAllNodes,omitempty"`
+	EnableScheduler     bool `json:"enableScheduler,omitempty"`
+	DisableFakeKubelets bool `json:"disableFakeKubelets,omitempty"`
+	FakeKubeletIPs      bool `json:"fakeKubeletIPs,omitempty"`
+	ClearNodeImages     bool `json:"clearNodeImages,omitempty"`
+
+	NodeSelector        string `json:"nodeSelector,omitempty"`
+	EnforceNodeSelector bool   `json:"enforceNodeSelector,omitempty"`
+	ServiceAccount      string `json:"serviceAccount,omitempty"`
+
+	OverrideHosts               bool   `json:"overrideHosts,omitempty"`
+	OverrideHostsContainerImage string `json:"overrideHostsContainerImage,omitempty"`
+
+	ClusterDomain string `json:"clusterDomain,omitempty"`
+
+	LeaderElect   bool `json:"leaderElect,omitempty"`
+	LeaseDuration int  `json:"leaseDuration,omitempty"`
+	RenewDeadline int  `json:"renewDeadline,omitempty"`
+	RetryPeriod   int  `json:"retryPeriod,omitempty"`
+
+	PluginListenAddress string   `json:"pluginListenAddress,omitempty"`
+	Plugins             []string `json:"plugins,omitempty"`
+
+	DefaultImageRegistry string `json:"defaultImageRegistry,omitempty"`
+
+	EnforcePodSecurityStandard string `json:"enforcePodSecurityStandard,omitempty"`
+
+	SyncLabels []string `json:"syncLabels,omitempty"`
+
+	// hostpath mapper options
+	// this is only needed if using vcluster-hostpath-mapper component
+	// see: https://github.com/loft-sh/vcluster-hostpath-mapper
+	MountPhysicalHostPaths bool `json:"mountPhysicalHostPaths,omitempty"`
+
+	HostMetricsBindAddress    string `json:"hostMetricsBindAddress,omitempty"`
+	VirtualMetricsBindAddress string `json:"virtualMetricsBindAddress,omitempty"`
+
+	MultiNamespaceMode bool `json:"multiNamespaceMode,omitempty"`
+	SyncAllSecrets     bool `json:"syncAllSecrets,omitempty"`
+	SyncAllConfigMaps  bool `json:"syncAllConfigMaps,omitempty"`
+
+	ProxyMetricsServer         bool `json:"proxyMetricsServer,omitempty"`
+	ServiceAccountTokenSecrets bool `json:"serviceAccountTokenSecrets,omitempty"`
+
+	// DEPRECATED FLAGS
+	DeprecatedSyncNodeChanges bool `json:"syncNodeChanges"`
+}
+
+type LegacyVirtualClusterProOptions struct {
+	RemoteKubeConfig  string `json:"remoteKubeConfig,omitempty"`
+	RemoteNamespace   string `json:"remoteNamespace,omitempty"`
+	RemoteServiceName string `json:"remoteServiceName,omitempty"`
+	EtcdReplicas      int    `json:"etcdReplicas,omitempty"`
+	IntegratedCoredns bool   `json:"integratedCoreDNS,omitempty"`
+	EtcdEmbedded      bool   `json:"etcdEmbedded,omitempty"`
+
+	NoopSyncer            bool `json:"noopSyncer,omitempty"`
+	SyncKubernetesService bool `json:"synck8sService,omitempty"`
+}
+
+/*
+func AddProFlags(flags *pflag.FlagSet, options *VirtualClusterOptions) {
+	flags.StringVar(&options.ProOptions.ProLicenseSecret, "pro-license-secret", "", "If set, vCluster.Pro will try to find this secret to retrieve the vCluster.Pro license.")
+
+	flags.StringVar(&options.ProOptions.RemoteKubeConfig, "remote-kube-config", "", "If set, will use the remote kube-config instead of the local in-cluster one. Expects a kube config to a headless vcluster installation")
+	flags.StringVar(&options.ProOptions.RemoteNamespace, "remote-namespace", "", "If set, will use this as the remote namespace")
+	flags.StringVar(&options.ProOptions.RemoteServiceName, "remote-service-name", "", "If set, will use this as the remote service name")
+
+	flags.BoolVar(&options.ProOptions.IntegratedCoredns, "integrated-coredns", false, "If enabled vcluster will spin an in memory coreDNS inside the syncer container")
+	flags.BoolVar(&options.ProOptions.UseCoreDNSPlugin, "use-coredns-plugin", false, "If enabled, the vcluster plugin for coredns will be used")
+	flags.BoolVar(&options.ProOptions.NoopSyncer, "noop-syncer", false, "If enabled will setup a noop Syncer that filters and proxies requests to a specified remote cluster")
+	flags.BoolVar(&options.ProOptions.SyncKubernetesService, "sync-k8s-service", false, "If enabled will sync the kubernetes service endpoints in the remote cluster with the load balancer ip of this cluster")
+
+	flags.BoolVar(&options.ProOptions.EtcdEmbedded, "etcd-embedded", false, "If true, will start an embedded etcd within vCluster")
+	flags.StringVar(&options.ProOptions.MigrateFrom, "migrate-from", "", "The url (including protocol) of the original database")
+	flags.IntVar(&options.ProOptions.EtcdReplicas, "etcd-replicas", 0, "The amount of replicas the etcd has")
+
+	flags.StringArrayVar(&options.ProOptions.EnforceValidatingHooks, "enforce-validating-hook", nil, "A validating hook configuration in yaml format encoded with base64. Can be used multiple times")
+	flags.StringArrayVar(&options.ProOptions.EnforceMutatingHooks, "enforce-mutating-hook", nil, "A mutating hook configuration in yaml format encoded with base64. Can be used multiple times")
+}
 
 func AddFlags(flags *pflag.FlagSet, options *VirtualClusterOptions) {
 	flags.StringVar(&options.KubeConfigContextName, "kube-config-context-name", "", "If set, will override the context name of the generated virtual cluster kube config with this name")
@@ -54,7 +163,7 @@ func AddFlags(flags *pflag.FlagSet, options *VirtualClusterOptions) {
 	flags.StringVar(&options.DefaultImageRegistry, "default-image-registry", "", "This address will be prepended to all deployed system images by vcluster")
 
 	flags.StringVar(&options.EnforcePodSecurityStandard, "enforce-pod-security-standard", "", "This can be set to 'privileged', 'baseline', or 'restricted' to make vcluster enforce these policies during translation.")
-	flags.StringSliceVar(&options.SyncLabels, "sync-labels", []string{}, "The specified labels will be synced to physical resources, in addition to their vcluster translated versions. Supports wildcards, e.g --sync-labels=my.company/* will sync all labels that match the given prefix.")
+	flags.StringSliceVar(&options.SyncLabels, "sync-labels", []string{}, "The specified labels will be synced to physical resources, in addition to their vcluster translated versions. Supported wildcard - '/*'. e.g --sync-labels=my.company/* will sync all labels that match the given prefix 'my.company/'.")
 	flags.StringSliceVar(&options.Plugins, "plugins", []string{}, "The plugins to wait for during startup")
 
 	flags.StringSliceVar(&options.MapVirtualServices, "map-virtual-service", []string{}, "Maps a given service inside the virtual cluster to a service inside the host cluster. E.g. default/test=physical-service")
@@ -83,4 +192,4 @@ func AddFlags(flags *pflag.FlagSet, options *VirtualClusterOptions) {
 	flags.StringVar(&options.DeprecatedSuffix, "suffix", "", "DEPRECATED: use --name instead")
 	flags.StringVar(&options.DeprecatedOwningStatefulSet, "owning-statefulset", "", "DEPRECATED: use --set-owner instead")
 	flags.StringVar(&options.DeprecatedDisableSyncResources, "disable-sync-resources", "", "DEPRECATED: use --sync instead")
-}
+}*/
