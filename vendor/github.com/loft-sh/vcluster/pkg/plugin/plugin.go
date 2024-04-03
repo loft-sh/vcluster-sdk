@@ -3,8 +3,9 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"net/http"
 
-	"github.com/loft-sh/vcluster/pkg/options"
+	"github.com/loft-sh/vcluster/pkg/config"
 	plugintypes "github.com/loft-sh/vcluster/pkg/plugin/types"
 	pluginv1 "github.com/loft-sh/vcluster/pkg/plugin/v1"
 	pluginv2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
@@ -13,6 +14,9 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// IsPlugin signals if the current binary is a plugin
+var IsPlugin = false
 
 var DefaultManager = newManager()
 
@@ -30,18 +34,21 @@ type manager struct {
 
 func (m *manager) Start(
 	ctx context.Context,
-	currentNamespace, targetNamespace string,
 	virtualKubeConfig *rest.Config,
-	physicalKubeConfig *rest.Config,
 	syncerConfig *clientcmdapi.Config,
-	options *options.VirtualClusterOptions,
+	vConfig *config.VirtualClusterConfig,
 ) error {
-	err := m.legacyManager.Start(ctx, currentNamespace, targetNamespace, virtualKubeConfig, physicalKubeConfig, syncerConfig, options)
+	legacyOptions, err := vConfig.LegacyOptions()
+	if err != nil {
+		return fmt.Errorf("build legacy options: %w", err)
+	}
+
+	err = m.legacyManager.Start(ctx, vConfig.WorkloadNamespace, vConfig.WorkloadTargetNamespace, virtualKubeConfig, vConfig.WorkloadConfig, syncerConfig, legacyOptions)
 	if err != nil {
 		return fmt.Errorf("start legacy plugins: %w", err)
 	}
 
-	err = m.pluginManager.Start(ctx, currentNamespace, physicalKubeConfig, syncerConfig, options)
+	err = m.pluginManager.Start(ctx, syncerConfig, vConfig)
 	if err != nil {
 		return fmt.Errorf("start plugins: %w", err)
 	}
@@ -82,4 +89,8 @@ func (m *manager) HasPlugins() bool {
 
 func (m *manager) SetProFeatures(proFeatures map[string]bool) {
 	m.pluginManager.ProFeatures = proFeatures
+}
+
+func (m *manager) WithInterceptors(next http.Handler) http.Handler {
+	return m.pluginManager.WithInterceptors(next)
 }

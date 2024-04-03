@@ -1,12 +1,14 @@
 module github.com/loft-sh/vcluster-sdk
 
-go 1.21.5
+go 1.22.0
+
+toolchain go1.22.1
 
 require (
 	github.com/ghodss/yaml v1.0.0
 	github.com/hashicorp/go-plugin v1.6.0
 	github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a
-	github.com/loft-sh/vcluster v0.19.0-beta.2
+	github.com/loft-sh/vcluster v0.20.0-alpha.2.0.20240403130844-8bb987ed97b4
 	github.com/onsi/ginkgo/v2 v2.14.0
 	github.com/onsi/gomega v1.30.0
 	github.com/pkg/errors v0.9.1
@@ -98,7 +100,6 @@ require (
 	github.com/loft-sh/jspolicy v0.2.2 // indirect
 	github.com/loft-sh/loftctl/v3 v3.4.0-beta.11 // indirect
 	github.com/loft-sh/utils v0.0.29 // indirect
-	github.com/loft-sh/vcluster-values v0.0.0-20240207093538-4bbb24e9f699 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

@@ -1,4 +1,4 @@
-package manifests
+package deploy
 
 import (
 	"context"
@@ -26,7 +26,6 @@ func ApplyGivenInitManifests(ctx context.Context, vClient client.Client, vConfig
 		klog.Errorf("unable to parse objects: %v", err)
 		return errors.Wrap(err, "unable to parse objects")
 	}
-
 	if len(lastAppliedObjects) == 0 && len(objs) == 0 {
 		return nil
 	}

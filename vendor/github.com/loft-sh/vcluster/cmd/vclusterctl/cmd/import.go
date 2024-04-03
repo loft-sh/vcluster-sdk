@@ -13,7 +13,7 @@ import (
 	"github.com/loft-sh/log/terminal"
 	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/find"
 	"github.com/loft-sh/vcluster/cmd/vclusterctl/flags"
-	"github.com/loft-sh/vcluster/pkg/pro"
+	"github.com/loft-sh/vcluster/pkg/procli"
 	"github.com/loft-sh/vcluster/pkg/util/compress"
 	"github.com/mgutz/ansi"
 	"github.com/spf13/cobra"
@@ -26,13 +26,11 @@ import (
 
 type ImportCmd struct {
 	*flags.GlobalFlags
-
+	Log            log.Logger
 	ClusterName    string
 	Project        string
 	ImportName     string
 	DisableUpgrade bool
-
-	Log log.Logger
 }
 
 func NewImportCmd(globalFlags *flags.GlobalFlags) (*cobra.Command, error) {
@@ -58,7 +56,7 @@ vcluster import my-vcluster --cluster connected-cluster \
 		Long:  description,
 		Args:  loftctlUtil.VClusterNameOnlyValidator,
 		RunE: func(cobraCmd *cobra.Command, args []string) error {
-			proClient, err := pro.CreateProClient()
+			proClient, err := procli.CreateProClient()
 			if err != nil {
 				return err
 			}
@@ -92,7 +90,7 @@ vcluster import my-vcluster --cluster connected-cluster \
 // Run executes the functionality
 func (cmd *ImportCmd) Run(ctx context.Context, args []string, proClient client.Client) error {
 	// Get vClusterName from command argument
-	var vClusterName = args[0]
+	vClusterName := args[0]
 
 	managementClient, err := proClient.Management()
 	if err != nil {
