@@ -21,7 +21,7 @@ type server interface {
 	Serve()
 
 	// SetReady signals the plugin server the plugin is ready to start
-	SetReady(hooks map[types.VersionKindType][]ClientHook)
+	SetReady(hooks map[types.VersionKindType][]ClientHook, interceptors []Interceptor, port int)
 
 	// Initialized retrieves the initialize request
 	Initialized() <-chan *pluginv2.Initialize_Request
@@ -43,7 +43,9 @@ func newPluginServer() (server, error) {
 type pluginServer struct {
 	pluginv2.UnimplementedPluginServer
 
-	hooks map[types.VersionKindType][]ClientHook
+	hooks            map[types.VersionKindType][]ClientHook
+	interceptors     []Interceptor
+	interceptorsPort int
 
 	initialized chan *pluginv2.Initialize_Request
 	isReady     chan struct{}
@@ -88,8 +90,10 @@ func (p *pluginServer) IsLeader() <-chan struct{} {
 	return p.isLeader
 }
 
-func (p *pluginServer) SetReady(hooks map[types.VersionKindType][]ClientHook) {
+func (p *pluginServer) SetReady(hooks map[types.VersionKindType][]ClientHook, interceptors []Interceptor, port int) {
 	p.hooks = hooks
+	p.interceptors = interceptors
+	p.interceptorsPort = port
 	close(p.isReady)
 }
 
@@ -216,9 +220,11 @@ func (p *pluginServer) GetPluginConfig(context.Context, *pluginv2.GetPluginConfi
 		return nil, err
 	}
 
+	interceptorConfig := p.getInterceptorConfig()
 	// build plugin config
 	pluginConfig := &v2.PluginConfig{
-		ClientHooks: clientHooks,
+		ClientHooks:  clientHooks,
+		Interceptors: interceptorConfig,
 	}
 
 	// marshal plugin config
@@ -263,6 +269,15 @@ func (p *pluginServer) getClientHooks() ([]*v2.ClientHook, error) {
 	}
 
 	return registeredHooks, nil
+}
+
+func (p *pluginServer) getInterceptorConfig() map[string][]v2.InterceptorRule {
+	res := make(map[string][]v2.InterceptorRule)
+	for _, interceptor := range p.interceptors {
+		res[interceptor.Name()] = interceptor.InterceptionRules()
+	}
+
+	return res
 }
 
 var _ plugin.Plugin = &pluginServer{}

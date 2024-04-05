@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"net/http"
 
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
@@ -56,6 +57,16 @@ type ClientHook interface {
 
 	// Resource is the typed resource (e.g. &corev1.Pod{}) that should get mutated.
 	Resource() client.Object
+}
+
+type Interceptor interface {
+	syncertypes.Base
+
+	// Handler is the handler that will handle the requests delegated by the syncer
+	http.Handler
+
+	// InterceptionRules returns an rbac style struct which defines what to intercept
+	InterceptionRules() []v2.InterceptorRule
 }
 
 type MutateCreateVirtual interface {

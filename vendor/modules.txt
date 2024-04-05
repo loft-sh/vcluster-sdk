@@ -407,10 +407,9 @@ github.com/loft-sh/utils/pkg/command
 github.com/loft-sh/utils/pkg/downloader
 github.com/loft-sh/utils/pkg/downloader/commands
 github.com/loft-sh/utils/pkg/extract
-# github.com/loft-sh/vcluster v0.20.0-alpha.2.0.20240403130844-8bb987ed97b4
+# github.com/loft-sh/vcluster v0.20.0-alpha.3.0.20240409111424-27cde82f6544
 ## explicit; go 1.22.0
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd
-github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/app/create
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/app/localkubernetes
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/app/podprinter
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/find
@@ -428,6 +427,7 @@ github.com/loft-sh/vcluster/pkg/authorization/impersonationauthorizer
 github.com/loft-sh/vcluster/pkg/authorization/kubeletauthorizer
 github.com/loft-sh/vcluster/pkg/certs
 github.com/loft-sh/vcluster/pkg/config
+github.com/loft-sh/vcluster/pkg/config/legacyconfig
 github.com/loft-sh/vcluster/pkg/constants
 github.com/loft-sh/vcluster/pkg/controllers
 github.com/loft-sh/vcluster/pkg/controllers/coredns

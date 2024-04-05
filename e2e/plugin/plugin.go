@@ -192,4 +192,14 @@ var _ = ginkgo.Describe("Plugin test", func() {
 			WithTimeout(pollingDurationLong).
 			Should(gomega.BeTrue())
 	})
+
+	ginkgo.It("check the interceptor", func() {
+		// wait for secret to become synced
+		vPod := &corev1.Pod{}
+		err := f.VclusterCRClient.Get(f.Context, types.NamespacedName{Name: "stuff", Namespace: "test"}, vPod)
+		framework.ExpectNoError(err)
+
+		// check if secret is synced correctly
+		framework.ExpectEqual(vPod.Name, "definitelynotstuff")
+	})
 })

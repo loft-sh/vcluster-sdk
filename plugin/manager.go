@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"strconv"
 	"sync"
 
 	"github.com/ghodss/yaml"
@@ -22,6 +24,7 @@ import (
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
 	contextutil "github.com/loft-sh/vcluster/pkg/util/context"
 	"github.com/pkg/errors"
+	"k8s.io/apiserver/pkg/endpoints/handlers/responsewriters"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -30,7 +33,9 @@ import (
 )
 
 func newManager() Manager {
-	return &manager{}
+	return &manager{
+		interceptorsHandlers: make(map[string]http.Handler),
+	}
 }
 
 type manager struct {
@@ -46,6 +51,10 @@ type manager struct {
 	pluginServer server
 
 	syncers []syncertypes.Base
+
+	interceptorsHandlers map[string]http.Handler
+	interceptors         []Interceptor
+	interceptorsPort     int
 
 	proConfig v2.InitConfigPro
 
@@ -106,6 +115,7 @@ func (m *manager) InitWithOptions(options Options) (*synccontext.RegisterContext
 	if err != nil {
 		return nil, fmt.Errorf("error decoding init config %s: %w", initRequest.Config, err)
 	}
+	m.interceptorsPort = initConfig.Port
 
 	// try to change working dir
 	if initConfig.WorkingDir != "" {
@@ -177,7 +187,15 @@ func (m *manager) Register(syncer syncertypes.Base) error {
 	m.m.Lock()
 	defer m.m.Unlock()
 
-	m.syncers = append(m.syncers, syncer)
+	if int, ok := syncer.(Interceptor); ok {
+		if _, ok := m.interceptorsHandlers[int.Name()]; ok {
+			return fmt.Errorf("could not add the interceptor %s because its name is already in use", int.Name())
+		}
+		m.interceptorsHandlers[int.Name()] = int
+		m.interceptors = append(m.interceptors, int)
+	} else {
+		m.syncers = append(m.syncers, syncer)
+	}
 	return nil
 }
 
@@ -189,6 +207,24 @@ func (m *manager) Start() error {
 
 	<-m.context.Context.Done()
 	return nil
+}
+
+func (m *manager) startInterceptors() error {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerName := r.Header.Get("VCluster-Plugin-Handler-Name")
+		if handlerName == "" {
+			responsewriters.InternalError(w, r, errors.New("header VCluster-Plugin-Handler-Name wasn't set"))
+			return
+		}
+		interceptorHandler, ok := m.interceptorsHandlers[handlerName]
+		if !ok {
+			responsewriters.InternalError(w, r, errors.New("header VCluster-Plugin-Handler-Name had no match"))
+			return
+		}
+		interceptorHandler.ServeHTTP(w, r)
+	})
+
+	return http.ListenAndServe("127.0.0.1:"+strconv.Itoa(m.interceptorsPort), handler)
 }
 
 func (m *manager) start() error {
@@ -206,9 +242,23 @@ func (m *manager) start() error {
 		return fmt.Errorf("find all hooks: %w", err)
 	}
 
-	// signal we are ready
-	m.pluginServer.SetReady(hooks)
+	// find the interceptors
+	interceptors := m.findAllInterceptors()
 
+	// signal we are ready
+	m.pluginServer.SetReady(hooks, interceptors, m.interceptorsPort)
+
+	if len(m.interceptors) > 0 {
+		go func() {
+			// we need to start them regardless of being the leader, since the traffic is
+			// directed to all replicas
+			err := m.startInterceptors()
+			if err != nil {
+				klog.Error(err, "error while running the http interceptors:")
+				os.Exit(1)
+			}
+		}()
+	}
 	// wait until we are leader to continue
 	<-m.pluginServer.IsLeader()
 
@@ -303,6 +353,11 @@ func (m *manager) start() error {
 
 	klog.Infof("Successfully started plugin.")
 	return nil
+}
+
+func (m *manager) findAllInterceptors() []Interceptor {
+	klog.Info("len of m.interceptor is : ", len(m.interceptors))
+	return m.interceptors
 }
 
 func (m *manager) findAllHooks() (map[types.VersionKindType][]ClientHook, error) {
