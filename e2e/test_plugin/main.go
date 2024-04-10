@@ -31,6 +31,9 @@ func main() {
 	plugin.MustRegister(syncers.NewMyDeploymentSyncer(ctx))
 	plugin.MustRegister(syncers.NewCarSyncer(ctx))
 	plugin.MustRegister(syncers.NewImportSecrets(ctx))
+	plugin.MustRegister(syncers.DummyInterceptor{})
+
+	klog.Info("finished registering the plugins")
 	plugin.MustStart()
 }
 

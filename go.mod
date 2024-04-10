@@ -8,7 +8,7 @@ require (
 	github.com/ghodss/yaml v1.0.0
 	github.com/hashicorp/go-plugin v1.6.0
 	github.com/loft-sh/log v0.0.0-20230824104949-bd516c25712a
-	github.com/loft-sh/vcluster v0.20.0-alpha.2.0.20240403130844-8bb987ed97b4
+	github.com/loft-sh/vcluster v0.20.0-alpha.3.0.20240409111424-27cde82f6544
 	github.com/onsi/ginkgo/v2 v2.14.0
 	github.com/onsi/gomega v1.30.0
 	github.com/pkg/errors v0.9.1

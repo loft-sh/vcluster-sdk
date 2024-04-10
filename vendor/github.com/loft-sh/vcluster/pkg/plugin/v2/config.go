@@ -30,13 +30,8 @@ type InitConfigPro struct {
 
 // PluginConfig is the config the plugin sends back to the syncer
 type PluginConfig struct {
-	ClientHooks  []*ClientHook      `json:"clientHooks,omitempty"`
-	Interceptors *InterceptorConfig `json:"interceptorConfig,omitempty"`
-}
-
-type InterceptorConfig struct {
-	Port         int           `json:"port"`
-	Interceptors []Interceptor `json:"interceptors"`
+	ClientHooks  []*ClientHook                `json:"clientHooks,omitempty"`
+	Interceptors map[string][]InterceptorRule `json:"interceptors,omitempty"`
 }
 
 type ClientHook struct {
@@ -45,9 +40,8 @@ type ClientHook struct {
 	Types      []string `json:"types,omitempty"`
 }
 
-type Interceptor struct {
+type InterceptorRule struct {
 	APIGroups       []string `json:"apiGroups,omitempty"`
-	HandlerName     string   `json:"name,omitempty"`
 	Resources       []string `json:"resources,omitempty"`
 	ResourceNames   []string `json:"resourceNames,omitempty"`
 	NonResourceURLs []string `json:"nonResourceURLs,omitempty"`

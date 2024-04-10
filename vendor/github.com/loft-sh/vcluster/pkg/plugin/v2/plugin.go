@@ -108,7 +108,6 @@ func (m *Manager) Start(
 	for _, vClusterPlugin := range m.Plugins {
 		// build the start request
 		initRequest, err := m.buildInitRequest(filepath.Dir(vClusterPlugin.Path), syncerConfig, vConfig, port)
-		port++
 
 		if err != nil {
 			return fmt.Errorf("build start request: %w", err)
@@ -139,14 +138,14 @@ func (m *Manager) Start(
 		}
 
 		// register Interceptors
-		if pluginConfig.Interceptors != nil {
-			err = m.registerInterceptors(*pluginConfig.Interceptors)
-			if err != nil {
-				return fmt.Errorf("error adding interceptor for plugin %s: %w", vClusterPlugin.Path, err)
-			}
+		err = m.registerInterceptors(pluginConfig.Interceptors, port)
+		if err != nil {
+			return fmt.Errorf("error adding interceptor for plugin %s: %w", vClusterPlugin.Path, err)
 		}
 
 		klog.FromContext(ctx).Info("Successfully loaded plugin", "plugin", vClusterPlugin.Path)
+
+		port++
 	}
 
 	return nil
@@ -332,32 +331,32 @@ func (m *Manager) HasPlugins() bool {
 	return len(m.Plugins) > 0
 }
 
-func validateInterceptor(interceptor Interceptor) error {
+func validateInterceptor(interceptor InterceptorRule, name string) error {
 	if len(interceptor.Verbs) == 0 {
-		return fmt.Errorf("verb is empty in interceptor plugin %s  ", interceptor.HandlerName)
+		return fmt.Errorf("verb is empty in interceptor plugin %s  ", name)
 	}
 	// check for wildcards and extra names, which should not be allowed
 	if slices.Contains(interceptor.Resources, "*") && len(interceptor.Resources) > 1 {
-		return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other resources, or is empty. please either specify * or a list of resource", interceptor.HandlerName)
+		return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other resources, or is empty. please either specify * or a list of resource", name)
 	}
 	if slices.Contains(interceptor.APIGroups, "*") && len(interceptor.APIGroups) > 1 {
-		return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other apigroups, or is empty. please either specify * or a list of apigroups", interceptor.HandlerName)
+		return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other apigroups, or is empty. please either specify * or a list of apigroups", name)
 	}
 
 	// make sure that if we don't have any nonresourceurl we at least have some group + resource
 	if len(interceptor.NonResourceURLs) == 0 {
 		// check for wildcards and extra names, which should not be allowed
 		if len(interceptor.Resources) == 0 {
-			return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other resources, or is empty. please either specify * or a list of resource", interceptor.HandlerName)
+			return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other resources, or is empty. please either specify * or a list of resource", name)
 		}
 		if len(interceptor.APIGroups) == 0 {
-			return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other apigroups, or is empty. please either specify * or a list of apigroups", interceptor.HandlerName)
+			return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other apigroups, or is empty. please either specify * or a list of apigroups", name)
 		}
 	}
 
 	if (slices.Contains(interceptor.Verbs, "*") && len(interceptor.Verbs) > 1) ||
 		len(interceptor.Verbs) == 0 {
-		return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other verbs, or is empty. please either specify * or a list of verb", interceptor.HandlerName)
+		return fmt.Errorf("error while loading the plugins, interceptor for handler %s defines both * and other verbs, or is empty. please either specify * or a list of verb", name)
 	}
 	// having a wildcard char not at the end is forbidden
 	for _, nonResourceURL := range interceptor.NonResourceURLs {
@@ -370,31 +369,33 @@ func validateInterceptor(interceptor Interceptor) error {
 	return nil
 }
 
-func (m *Manager) registerInterceptors(interceptors InterceptorConfig) error {
+func (m *Manager) registerInterceptors(interceptors map[string][]InterceptorRule, port int) error {
 	// register the interceptors
-	for _, interceptorsInfos := range interceptors.Interceptors {
+	for name, interceptorRules := range interceptors {
 		// make sure that it is valid
-		if err := validateInterceptor(interceptorsInfos); err != nil {
-			return err
-		}
+		for _, rule := range interceptorRules {
+			if err := validateInterceptor(rule, name); err != nil {
+				return err
+			}
 
-		// register resource interceptors for each verb
-		err := m.registerResourceInterceptor(interceptors.Port, interceptorsInfos)
-		if err != nil {
-			return err
-		}
+			// register resource interceptors for each verb
+			err := m.registerResourceInterceptor(port, rule, name)
+			if err != nil {
+				return err
+			}
 
-		// register nonresourceurls interceptors for each verb
-		err = m.registerNonResourceURL(interceptors, interceptorsInfos)
-		if err != nil {
-			return err
+			// register nonresourceurls interceptors for each verb
+			err = m.registerNonResourceURL(port, rule, name)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (m *Manager) registerResourceInterceptor(port int, interceptorsInfos Interceptor) error {
+func (m *Manager) registerResourceInterceptor(port int, interceptorsInfos InterceptorRule, interceptorName string) error {
 	// add all group/version/verb/resourceName tuples to the map
 	// each group
 	if m.hasConflictWithExistingWildcard(interceptorsInfos.APIGroups, interceptorsInfos.Resources, interceptorsInfos.Verbs, interceptorsInfos.ResourceNames) {
@@ -431,10 +432,10 @@ func (m *Manager) registerResourceInterceptor(port int, interceptorsInfos Interc
 				// now add the specific resource names
 				if len(interceptorsInfos.ResourceNames) == 0 {
 					// empty slice means everything is allowed
-					m.ResourceInterceptorsPorts[apigroup][resource][verb]["*"] = portHandlerName{handlerName: interceptorsInfos.HandlerName, port: port}
+					m.ResourceInterceptorsPorts[apigroup][resource][verb]["*"] = portHandlerName{handlerName: interceptorName, port: port}
 				} else {
 					for _, name := range interceptorsInfos.ResourceNames {
-						m.ResourceInterceptorsPorts[apigroup][resource][verb][name] = portHandlerName{handlerName: interceptorsInfos.HandlerName, port: port}
+						m.ResourceInterceptorsPorts[apigroup][resource][verb][name] = portHandlerName{handlerName: interceptorName, port: port}
 					}
 				}
 			}
@@ -563,7 +564,7 @@ func hasResourceNameConflit(existing map[string]portHandlerName, resourceName st
 	return ok
 }
 
-func (m *Manager) registerNonResourceURL(interceptors InterceptorConfig, interceptorsInfos Interceptor) error {
+func (m *Manager) registerNonResourceURL(port int, interceptorsInfos InterceptorRule, interceptorName string) error {
 	// register nonresourceurls for each verb
 	for _, nonResourceURL := range interceptorsInfos.NonResourceURLs {
 		// ignore empty resources
@@ -575,7 +576,7 @@ func (m *Manager) registerNonResourceURL(interceptors InterceptorConfig, interce
 				return fmt.Errorf("error while loading the plugins, multiple interceptor plugins are registered for the same non resource url %s and verb %s", nonResourceURL, v)
 			}
 
-			m.NonResourceInterceptorsPorts[nonResourceURL][v] = portHandlerName{port: interceptors.Port, handlerName: interceptorsInfos.HandlerName}
+			m.NonResourceInterceptorsPorts[nonResourceURL][v] = portHandlerName{port: port, handlerName: interceptorName}
 		}
 	}
 	return nil
@@ -826,7 +827,7 @@ func (m *Manager) WithInterceptors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info, ok := request.RequestInfoFrom(r.Context())
 		if !ok {
-			klog.V(1).Info("could not determine the infos from the request, serving next handler")
+			klog.V(1).Infof("could not determine the infos from the request %s, serving next handler", r.URL.Path)
 			next.ServeHTTP(w, r)
 			return
 		}
