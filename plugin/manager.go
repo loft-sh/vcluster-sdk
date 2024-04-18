@@ -193,9 +193,9 @@ func (m *manager) Register(syncer syncertypes.Base) error {
 		}
 		m.interceptorsHandlers[int.Name()] = int
 		m.interceptors = append(m.interceptors, int)
-	} else {
-		m.syncers = append(m.syncers, syncer)
 	}
+
+	m.syncers = append(m.syncers, syncer)
 	return nil
 }
 
