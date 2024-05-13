@@ -2,13 +2,20 @@ package config
 
 import (
 	_ "embed"
+	"errors"
+	"fmt"
+	"reflect"
 	"regexp"
+	"strings"
 
-	"github.com/ghodss/yaml"
+	"github.com/invopop/jsonschema"
+	"sigs.k8s.io/yaml"
 )
 
 //go:embed values.yaml
 var Values string
+
+var ErrInvalidConfig = errors.New("invalid config")
 
 // NewDefaultConfig creates a new config based on the values.yaml, including all default values.
 func NewDefaultConfig() (*Config, error) {
@@ -67,6 +74,121 @@ type Config struct {
 
 	// Plugin specifies which vCluster plugins to enable. Use "plugins" instead. Do not use this option anymore.
 	Plugin map[string]Plugin `json:"plugin,omitempty"`
+}
+
+func (c *Config) UnmarshalYAMLStrict(data []byte) error {
+	return UnmarshalYAMLStrict(data, c)
+}
+
+// BackingStoreType returns the backing store type of the vCluster.
+// If no backing store is enabled, it returns StoreTypeUnknown.
+func (c *Config) BackingStoreType() StoreType {
+	switch {
+	case c.ControlPlane.BackingStore.Etcd.Embedded.Enabled:
+		return StoreTypeEmbeddedEtcd
+	case c.ControlPlane.BackingStore.Etcd.Deploy.Enabled:
+		return StoreTypeExternalEtcd
+	case c.ControlPlane.BackingStore.Database.Embedded.Enabled:
+		return StoreTypeEmbeddedDatabase
+	case c.ControlPlane.BackingStore.Database.External.Enabled:
+		return StoreTypeExternalDatabase
+	default:
+		return StoreTypeEmbeddedDatabase
+	}
+}
+
+func (c *Config) Distro() string {
+	if c.ControlPlane.Distro.K3S.Enabled {
+		return K3SDistro
+	} else if c.ControlPlane.Distro.K0S.Enabled {
+		return K0SDistro
+	} else if c.ControlPlane.Distro.K8S.Enabled {
+		return K8SDistro
+	} else if c.ControlPlane.Distro.EKS.Enabled {
+		return EKSDistro
+	}
+
+	return K8SDistro
+}
+
+// ValidateChanges checks for disallowed config changes.
+// Currently only certain backingstore changes are allowed but no distro change.
+func ValidateChanges(oldCfg, newCfg *Config) error {
+	oldDistro, newDistro := oldCfg.Distro(), newCfg.Distro()
+	oldBackingStore, newBackingStore := oldCfg.BackingStoreType(), newCfg.BackingStoreType()
+
+	return ValidateStoreAndDistroChanges(newBackingStore, oldBackingStore, newDistro, oldDistro)
+}
+
+// ValidateStoreAndDistroChanges checks whether migrating from one store to the other is allowed.
+func ValidateStoreAndDistroChanges(currentStoreType, previousStoreType StoreType, currentDistro, previousDistro string) error {
+	if currentDistro != previousDistro {
+		return fmt.Errorf("seems like you were using %s as a distro before and now have switched to %s, please make sure to not switch between vCluster distros", previousDistro, currentDistro)
+	}
+
+	if currentStoreType != previousStoreType {
+		if currentStoreType != StoreTypeEmbeddedEtcd {
+			return fmt.Errorf("seems like you were using %s as a store before and now have switched to %s, please make sure to not switch between vCluster stores", previousStoreType, currentStoreType)
+		}
+		if previousStoreType != StoreTypeExternalEtcd && previousStoreType != StoreTypeEmbeddedDatabase {
+			return fmt.Errorf("seems like you were using %s as a store before and now have switched to %s, please make sure to not switch between vCluster stores", previousStoreType, currentStoreType)
+		}
+	}
+
+	return nil
+}
+
+func (c *Config) IsProFeatureEnabled() bool {
+	if len(c.Networking.ResolveDNS) > 0 {
+		return true
+	}
+
+	if c.ControlPlane.CoreDNS.Embedded {
+		return true
+	}
+
+	if c.Distro() == K8SDistro || c.Distro() == EKSDistro {
+		if c.ControlPlane.BackingStore.Database.External.Enabled {
+			return true
+		}
+	}
+
+	if c.ControlPlane.BackingStore.Etcd.Embedded.Enabled {
+		return true
+	}
+
+	if len(c.Policies.CentralAdmission.ValidatingWebhooks) > 0 || len(c.Policies.CentralAdmission.MutatingWebhooks) > 0 {
+		return true
+	}
+
+	if c.ControlPlane.HostPathMapper.Central {
+		return true
+	}
+
+	if c.Experimental.SyncSettings.DisableSync {
+		return true
+	}
+
+	if c.Experimental.SyncSettings.RewriteKubernetesService {
+		return true
+	}
+
+	if c.Experimental.IsolatedControlPlane.Enabled {
+		return true
+	}
+
+	if len(c.Experimental.DenyProxyRequests) > 0 {
+		return true
+	}
+
+	return false
+}
+
+func UnmarshalYAMLStrict(data []byte, i any) error {
+	if err := yaml.UnmarshalStrict(data, i); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+	return nil
 }
 
 // ExportKubeConfig describes how vCluster should export the vCluster kubeconfig.
@@ -157,17 +279,22 @@ type SyncFromHost struct {
 	// IngressClasses defines if ingress classes should get synced from the host cluster to the virtual cluster, but not back.
 	IngressClasses EnableSwitch `json:"ingressClasses,omitempty"`
 
-	// StorageClasses defines if storage classes should get synced from the host cluster to the virtual cluster, but not back.
-	StorageClasses EnableSwitch `json:"storageClasses,omitempty"`
+	// StorageClasses defines if storage classes should get synced from the host cluster to the virtual cluster, but not back. If auto, is automatically enabled when the virtual scheduler is enabled.
+	StorageClasses EnableAutoSwitch `json:"storageClasses,omitempty"`
 
-	// CSINodes defines if csi nodes should get synced from the host cluster to the virtual cluster, but not back.
-	CSINodes EnableSwitch `json:"csiNodes,omitempty"`
+	// CSINodes defines if csi nodes should get synced from the host cluster to the virtual cluster, but not back. If auto, is automatically enabled when the virtual scheduler is enabled.
+	CSINodes EnableAutoSwitch `json:"csiNodes,omitempty"`
 
-	// CSIDrivers defines if csi drivers should get synced from the host cluster to the virtual cluster, but not back.
-	CSIDrivers EnableSwitch `json:"csiDrivers,omitempty"`
+	// CSIDrivers defines if csi drivers should get synced from the host cluster to the virtual cluster, but not back. If auto, is automatically enabled when the virtual scheduler is enabled.
+	CSIDrivers EnableAutoSwitch `json:"csiDrivers,omitempty"`
 
-	// CSIStorageCapacities defines if csi storage capacities should get synced from the host cluster to the virtual cluster, but not back.
-	CSIStorageCapacities EnableSwitch `json:"csiStorageCapacities,omitempty"`
+	// CSIStorageCapacities defines if csi storage capacities should get synced from the host cluster to the virtual cluster, but not back. If auto, is automatically enabled when the virtual scheduler is enabled.
+	CSIStorageCapacities EnableAutoSwitch `json:"csiStorageCapacities,omitempty"`
+}
+
+type EnableAutoSwitch struct {
+	// Enabled defines if this option should be enabled.
+	Enabled StrBool `json:"enabled,omitempty" jsonschema:"oneof_type=string;boolean"`
 }
 
 type EnableSwitch struct {
@@ -208,8 +335,16 @@ type SyncRewriteHosts struct {
 	// Enabled specifies if rewriting stateful set pods should be enabled.
 	Enabled bool `json:"enabled,omitempty"`
 
-	// InitContainerImage is the image virtual cluster should use to rewrite this FQDN.
-	InitContainerImage string `json:"initContainerImage,omitempty"`
+	// InitContainer holds extra options for the init container used by vCluster to rewrite the FQDN for stateful set pods.
+	InitContainer SyncRewriteHostsInitContainer `json:"initContainer,omitempty"`
+}
+
+type SyncRewriteHostsInitContainer struct {
+	// Image is the image virtual cluster should use to rewrite this FQDN.
+	Image string `json:"image,omitempty"`
+
+	// Resources are the resources that should be assigned to the init container for each stateful set init container.
+	Resources Resources `json:"resources,omitempty"`
 }
 
 type SyncNodes struct {
@@ -268,10 +403,14 @@ type Networking struct {
 	ReplicateServices ReplicateServices `json:"replicateServices,omitempty"`
 
 	// ResolveDNS allows to define extra DNS rules. This only works if embedded coredns is configured.
-	ResolveDNS []ResolveDNS `json:"resolveDNS,omitempty"`
+	ResolveDNS []ResolveDNS `json:"resolveDNS,omitempty" product:"pro"`
 
 	// Advanced holds advanced network options.
 	Advanced NetworkingAdvanced `json:"advanced,omitempty"`
+}
+
+func (n Networking) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(n))
 }
 
 type ReplicateServices struct {
@@ -440,7 +579,7 @@ type ControlPlane struct {
 	Proxy ControlPlaneProxy `json:"proxy,omitempty"`
 
 	// HostPathMapper defines if vCluster should rewrite host paths.
-	HostPathMapper HostPathMapper `json:"hostPathMapper,omitempty"`
+	HostPathMapper HostPathMapper `json:"hostPathMapper,omitempty" product:"pro"`
 
 	// Ingress defines options for vCluster ingress deployed by Helm.
 	Ingress ControlPlaneIngress `json:"ingress,omitempty"`
@@ -456,6 +595,10 @@ type ControlPlane struct {
 
 	// Advanced holds additional configuration for the vCluster control plane.
 	Advanced ControlPlaneAdvanced `json:"advanced,omitempty"`
+}
+
+func (c ControlPlane) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(c))
 }
 
 type ControlPlaneStatefulSet struct {
@@ -596,9 +739,13 @@ type DistroContainerEnabled struct {
 }
 
 type StatefulSetImage struct {
-	// Configure the registry and repository of the container image, e.g. my-registry.com/my-repo/my-image.
+	// Configure the registry of the container image, e.g. my-registry.com or ghcr.io
+	// It defaults to ghcr.io and can be overriding either by using this field or controlPlane.advanced.defaultImageRegistry
+	Registry string `json:"registry,omitempty"`
+
+	// Configure the repository of the container image, e.g. my-repo/my-image.
 	// It defaults to the vCluster pro repository that includes the optional pro modules that are turned off by default.
-	// If you still want to use the pure OSS build, use 'ghcr.io/loft-sh/vcluster-oss' instead.
+	// If you still want to use the pure OSS build, use 'loft-sh/vcluster-oss' instead.
 	Repository string `json:"repository,omitempty"`
 
 	// Tag is the tag of the container image, e.g. latest
@@ -606,7 +753,11 @@ type StatefulSetImage struct {
 }
 
 type Image struct {
-	// Repository is the registry and repository of the container image, e.g. my-registry.com/my-repo/my-image
+	// Registry is the registry of the container image, e.g. my-registry.com or ghcr.io. This setting can be globally
+	// overridden via the controlPlane.advanced.defaultImageRegistry option. Empty means docker hub.
+	Registry string `json:"registry,omitempty"`
+
+	// Repository is the repository of the container image, e.g. my-repo/my-image
 	Repository string `json:"repository,omitempty"`
 
 	// Tag is the tag of the container image, e.g. latest
@@ -673,18 +824,26 @@ type DatabaseKine struct {
 
 type Etcd struct {
 	// Embedded defines to use embedded etcd as a storage backend for the virtual cluster
-	Embedded EtcdEmbedded `json:"embedded,omitempty"`
+	Embedded EtcdEmbedded `json:"embedded,omitempty" product:"pro"`
 
 	// Deploy defines to use an external etcd that is deployed by the helm chart
 	Deploy EtcdDeploy `json:"deploy,omitempty"`
 }
 
+func (e Etcd) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(e))
+}
+
 type EtcdEmbedded struct {
 	// Enabled defines if the embedded etcd should be used.
-	Enabled bool `json:"enabled,omitempty"`
+	Enabled bool `json:"enabled,omitempty" product:"pro"`
 
 	// MigrateFromDeployedEtcd signals that vCluster should migrate from the deployed external etcd to embedded etcd.
 	MigrateFromDeployedEtcd bool `json:"migrateFromDeployedEtcd,omitempty"`
+}
+
+func (e EtcdEmbedded) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(e))
 }
 
 type EtcdDeploy struct {
@@ -772,7 +931,7 @@ type HostPathMapper struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// Central specifies if the central host path mapper will be used
-	Central bool `json:"central,omitempty" product:"pro"`
+	Central bool `json:"central,omitempty"`
 }
 
 type CoreDNS struct {
@@ -793,6 +952,10 @@ type CoreDNS struct {
 
 	// OverwriteManifests can be used to overwrite the coredns manifests used to deploy coredns
 	OverwriteManifests string `json:"overwriteManifests,omitempty"`
+}
+
+func (c CoreDNS) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(c))
 }
 
 type CoreDNSService struct {
@@ -1103,6 +1266,10 @@ type Policies struct {
 	CentralAdmission CentralAdmission `json:"centralAdmission,omitempty" product:"pro"`
 }
 
+func (p Policies) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(p))
+}
+
 type ResourceQuota struct {
 	// Enabled defines if the resource quota should be enabled.
 	Enabled bool `json:"enabled,omitempty"`
@@ -1385,13 +1552,17 @@ type Experimental struct {
 	MultiNamespaceMode ExperimentalMultiNamespaceMode `json:"multiNamespaceMode,omitempty"`
 
 	// IsolatedControlPlane is a feature to run the vCluster control plane in a different Kubernetes cluster than the workloads themselves.
-	IsolatedControlPlane ExperimentalIsolatedControlPlane `json:"isolatedControlPlane,omitempty"`
+	IsolatedControlPlane ExperimentalIsolatedControlPlane `json:"isolatedControlPlane,omitempty" product:"pro"`
 
 	// VirtualClusterKubeConfig allows you to override distro specifics and specify where vCluster will find the required certificates and vCluster config.
 	VirtualClusterKubeConfig VirtualClusterKubeConfig `json:"virtualClusterKubeConfig,omitempty"`
 
 	// DenyProxyRequests denies certain requests in the vCluster proxy.
-	DenyProxyRequests []DenyRule `json:"denyProxyRequests,omitempty" pro:"true"`
+	DenyProxyRequests []DenyRule `json:"denyProxyRequests,omitempty" product:"pro"`
+}
+
+func (e Experimental) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(e))
 }
 
 type ExperimentalMultiNamespaceMode struct {
@@ -1404,7 +1575,7 @@ type ExperimentalMultiNamespaceMode struct {
 
 type ExperimentalIsolatedControlPlane struct {
 	// Enabled specifies if the isolated control plane feature should be enabled.
-	Enabled bool `json:"enabled,omitempty"`
+	Enabled bool `json:"enabled,omitempty" product:"pro"`
 
 	// Headless states that Helm should deploy the vCluster in headless mode for the isolated control plane.
 	Headless bool `json:"headless,omitempty"`
@@ -1421,10 +1592,10 @@ type ExperimentalIsolatedControlPlane struct {
 
 type ExperimentalSyncSettings struct {
 	// DisableSync will not sync any resources and disable most control plane functionality.
-	DisableSync bool `json:"disableSync,omitempty"`
+	DisableSync bool `json:"disableSync,omitempty" product:"pro"`
 
 	// RewriteKubernetesService will rewrite the Kubernetes service to point to the vCluster service if disableSync is enabled
-	RewriteKubernetesService bool `json:"rewriteKubernetesService,omitempty"`
+	RewriteKubernetesService bool `json:"rewriteKubernetesService,omitempty" product:"pro"`
 
 	// TargetNamespace is the namespace where the workloads should get synced to.
 	TargetNamespace string `json:"targetNamespace,omitempty"`
@@ -1440,6 +1611,10 @@ type ExperimentalSyncSettings struct {
 
 	// VirtualMetricsBindAddress is the bind address for the virtual manager
 	VirtualMetricsBindAddress string `json:"virtualMetricsBindAddress,omitempty"`
+}
+
+func (e ExperimentalSyncSettings) JSONSchemaExtend(base *jsonschema.Schema) {
+	addProToJSONSchema(base, reflect.TypeOf(e))
 }
 
 type ExperimentalDeploy struct {
@@ -1488,8 +1663,8 @@ type ExperimentalDeployHelmChart struct {
 }
 
 type Platform struct {
-	// APIKey defines how vCluster can find the api key used for the platform.
-	APIKey PlatformAPIKey `json:"apiKey,omitempty"`
+	// API defines how vCluster can contact the platform api.
+	API PlatformAPI `json:"api,omitempty"`
 
 	// Name is the name of the vCluster instance in the vCluster platform
 	Name string `json:"name,omitempty"`
@@ -1509,24 +1684,30 @@ type PlatformOwner struct {
 	Team string `json:"team,omitempty"`
 }
 
-type PlatformAPIKey struct {
-	// Value specifies the api key as a regular text value.
-	Value string `json:"value,omitempty"`
+type PlatformAPI struct {
+	// AccessKey specifies the access key as a regular text value.
+	AccessKey string `json:"accessKey,omitempty"`
 
-	// SecretRef defines where to find the platform api key. By default vCluster will search in the following locations in this precedence:
-	// * platform.apiKey.value
+	// Host specifies the platform host to use.
+	Host string `json:"host,omitempty"`
+
+	// Insecure specifies if the host uses a self-signed certificate.
+	Insecure bool `json:"insecure,omitempty"`
+
+	// SecretRef defines where to find the platform access key and host. By default, vCluster will search in the following locations in this precedence:
+	// * platform.api.accessKey
 	// * environment variable called LICENSE
-	// * secret specified under platform.secret.name
+	// * secret specified under platform.api.secretRef.name
 	// * secret called "vcluster-platform-api-key" in the vCluster namespace
-	SecretRef PlatformAPIKeySecretReference `json:"secretRef,omitempty"`
+	SecretRef PlatformAccessKeySecretReference `json:"secretRef,omitempty"`
 }
 
-// PlatformAPIKeySecretReference defines where to find the platform api key. The secret key name doesn't matter as long as the secret only contains a single key.
-type PlatformAPIKeySecretReference struct {
-	// Name is the name of the secret where the platform api key is stored. This defaults to vcluster-platform-api-key if undefined.
+// PlatformAccessKeySecretReference defines where to find the platform access key. The secret key name doesn't matter as long as the secret only contains a single key.
+type PlatformAccessKeySecretReference struct {
+	// Name is the name of the secret where the platform access key is stored. This defaults to vcluster-platform-api-key if undefined.
 	Name string `json:"name,omitempty"`
 
-	// Namespace defines the namespace where the api key secret should be retrieved from. If this is not equal to the namespace
+	// Namespace defines the namespace where the access key secret should be retrieved from. If this is not equal to the namespace
 	// where the vCluster instance is deployed, you need to make sure vCluster has access to this other namespace.
 	Namespace string `json:"namespace,omitempty"`
 }
@@ -1722,4 +1903,32 @@ type RuleWithVerbs struct {
 	// For non-resource requests, this is the lowercase http verb.
 	// If '*' is present, the length of the slice must be one.
 	Verbs []string `json:"operations,omitempty"`
+}
+
+// addProToJSONSchema looks for fields with the `product:"pro"` tag and adds the pro tag to the central field.
+// Requires `json:""` tag to be set as well.
+func addProToJSONSchema(base *jsonschema.Schema, t reflect.Type) {
+	proFields := []string{}
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("product")
+		jsonName := strings.Split(t.Field(i).Tag.Get("json"), ",")[0]
+		if tag == "" {
+			continue
+		}
+
+		proFields = append(proFields, jsonName)
+	}
+	if len(proFields) == 0 {
+		return
+	}
+	for _, field := range proFields {
+		central, ok := base.Properties.Get(field)
+		if !ok {
+			continue
+		}
+		if central.Extras == nil {
+			central.Extras = map[string]interface{}{}
+		}
+		central.Extras["pro"] = true
+	}
 }

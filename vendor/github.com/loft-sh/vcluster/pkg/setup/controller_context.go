@@ -103,11 +103,20 @@ func NewControllerContext(ctx context.Context, options *config.VirtualClusterCon
 
 func getLocalCacheOptions(options *config.VirtualClusterConfig) cache.Options {
 	// is multi namespace mode?
-	var defaultNamespaces map[string]cache.Config
+	defaultNamespaces := make(map[string]cache.Config)
 	if !options.Experimental.MultiNamespaceMode.Enabled {
-		defaultNamespaces = map[string]cache.Config{options.WorkloadTargetNamespace: {}}
+		defaultNamespaces[options.WorkloadTargetNamespace] = cache.Config{}
+	}
+	// do we need access to another namespace to export the kubeconfig ?
+	// we will need access to all the objects that the vcluster usually has access to
+	// otherwise the controller will not start
+	if options.ExportKubeConfig.Secret.Namespace != "" {
+		defaultNamespaces[options.ExportKubeConfig.Secret.Namespace] = cache.Config{}
 	}
 
+	if len(defaultNamespaces) == 0 {
+		return cache.Options{DefaultNamespaces: nil}
+	}
 	return cache.Options{DefaultNamespaces: defaultNamespaces}
 }
 
@@ -219,10 +228,10 @@ func CreateVClusterKubeConfig(config *clientcmdapi.Config, options *config.Virtu
 			config.Clusters[i].CertificateAuthorityData = o
 		}
 
-		if options.Config.ExportKubeConfig.Server != "" {
-			config.Clusters[i].Server = options.Config.ExportKubeConfig.Server
+		if options.ExportKubeConfig.Server != "" {
+			config.Clusters[i].Server = options.ExportKubeConfig.Server
 		} else {
-			config.Clusters[i].Server = fmt.Sprintf("https://localhost:%d", options.Config.ControlPlane.Proxy.Port)
+			config.Clusters[i].Server = fmt.Sprintf("https://localhost:%d", options.ControlPlane.Proxy.Port)
 		}
 	}
 
@@ -313,7 +322,7 @@ func newCurrentNamespaceClient(ctx context.Context, localManager ctrl.Manager, o
 	// as the regular cache is scoped to the options.TargetNamespace and cannot return
 	// objects from the current namespace.
 	currentNamespaceCache := localManager.GetCache()
-	if options.WorkloadNamespace != options.WorkloadTargetNamespace {
+	if !options.Experimental.MultiNamespaceMode.Enabled && options.WorkloadNamespace != options.WorkloadTargetNamespace {
 		currentNamespaceCache, err = cache.New(localManager.GetConfig(), cache.Options{
 			Scheme:            localManager.GetScheme(),
 			Mapper:            localManager.GetRESTMapper(),
