@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/loft-sh/vcluster/config"
-	"github.com/loft-sh/vcluster/pkg/config/legacyconfig"
+	"github.com/loft-sh/vcluster/config/legacyconfig"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
@@ -21,6 +21,18 @@ const (
 type VirtualClusterConfig struct {
 	// Holds the vCluster config
 	config.Config `json:",inline"`
+
+	// WorkloadConfig is the config to access the workload cluster
+	WorkloadConfig *rest.Config `json:"-"`
+
+	// WorkloadClient is the client to access the workload cluster
+	WorkloadClient kubernetes.Interface `json:"-"`
+
+	// ControlPlaneConfig is the config to access the control plane cluster
+	ControlPlaneConfig *rest.Config `json:"-"`
+
+	// ControlPlaneClient is the client to access the control plane cluster
+	ControlPlaneClient kubernetes.Interface `json:"-"`
 
 	// Name is the name of the vCluster
 	Name string `json:"name"`
@@ -39,36 +51,10 @@ type VirtualClusterConfig struct {
 
 	// ControlPlaneNamespace is the namespace where the vCluster control plane is running
 	ControlPlaneNamespace string `json:"controlPlaneNamespace,omitempty"`
-
-	// WorkloadConfig is the config to access the workload cluster
-	WorkloadConfig *rest.Config `json:"-"`
-
-	// WorkloadClient is the client to access the workload cluster
-	WorkloadClient kubernetes.Interface `json:"-"`
-
-	// ControlPlaneConfig is the config to access the control plane cluster
-	ControlPlaneConfig *rest.Config `json:"-"`
-
-	// ControlPlaneClient is the client to access the control plane cluster
-	ControlPlaneClient kubernetes.Interface `json:"-"`
 }
 
 func (v VirtualClusterConfig) EmbeddedDatabase() bool {
-	return !v.Config.ControlPlane.BackingStore.Database.External.Enabled && !v.Config.ControlPlane.BackingStore.Etcd.Embedded.Enabled && !v.Config.ControlPlane.BackingStore.Etcd.Deploy.Enabled
-}
-
-func (v VirtualClusterConfig) Distro() string {
-	if v.Config.ControlPlane.Distro.K3S.Enabled {
-		return config.K3SDistro
-	} else if v.Config.ControlPlane.Distro.K0S.Enabled {
-		return config.K0SDistro
-	} else if v.Config.ControlPlane.Distro.K8S.Enabled {
-		return config.K8SDistro
-	} else if v.Config.ControlPlane.Distro.EKS.Enabled {
-		return config.EKSDistro
-	}
-
-	return config.K8SDistro
+	return !v.ControlPlane.BackingStore.Database.External.Enabled && !v.ControlPlane.BackingStore.Etcd.Embedded.Enabled && !v.ControlPlane.BackingStore.Etcd.Deploy.Enabled
 }
 
 func (v VirtualClusterConfig) VirtualClusterKubeConfig() config.VirtualClusterKubeConfig {
@@ -100,7 +86,7 @@ func (v VirtualClusterConfig) VirtualClusterKubeConfig() config.VirtualClusterKu
 		}
 	}
 
-	retConfig := v.Config.Experimental.VirtualClusterKubeConfig
+	retConfig := v.Experimental.VirtualClusterKubeConfig
 	if retConfig.KubeConfig == "" {
 		retConfig.KubeConfig = distroConfig.KubeConfig
 	}
@@ -179,7 +165,7 @@ func (v VirtualClusterConfig) LegacyOptions() (*legacyconfig.LegacyVirtualCluste
 		EnforceNodeSelector:         true,
 		PluginListenAddress:         "localhost:10099",
 		OverrideHosts:               v.Sync.ToHost.Pods.RewriteHosts.Enabled,
-		OverrideHostsContainerImage: v.Sync.ToHost.Pods.RewriteHosts.InitContainerImage,
+		OverrideHostsContainerImage: v.Sync.ToHost.Pods.RewriteHosts.InitContainer.Image,
 		ServiceAccountTokenSecrets:  v.Sync.ToHost.Pods.UseSecretsForSATokens,
 		ClusterDomain:               v.Networking.Advanced.ClusterDomain,
 		LeaderElect:                 v.ControlPlane.StatefulSet.HighAvailability.Replicas > 1,
@@ -210,20 +196,20 @@ func (v VirtualClusterConfig) DisableMissingAPIs(discoveryClient discovery.Disco
 	}
 
 	// check if found
-	if v.Sync.FromHost.CSINodes.Enabled && !findResource(resources, "csinodes") {
-		v.Sync.FromHost.CSINodes.Enabled = false
+	if v.Sync.FromHost.CSINodes.Enabled != "false" && !findResource(resources, "csinodes") {
+		v.Sync.FromHost.CSINodes.Enabled = "false"
 		klog.Warningf("host kubernetes apiserver not advertising resource csinodes in GroupVersion storage.k8s.io/v1, disabling the syncer")
 	}
 
 	// check if found
-	if v.Sync.FromHost.CSIDrivers.Enabled && !findResource(resources, "csidrivers") {
-		v.Sync.FromHost.CSIDrivers.Enabled = false
+	if v.Sync.FromHost.CSIDrivers.Enabled != "false" && !findResource(resources, "csidrivers") {
+		v.Sync.FromHost.CSIDrivers.Enabled = "false"
 		klog.Warningf("host kubernetes apiserver not advertising resource csidrivers in GroupVersion storage.k8s.io/v1, disabling the syncer")
 	}
 
 	// check if found
-	if v.Sync.FromHost.CSIStorageCapacities.Enabled && !findResource(resources, "csistoragecapacities") {
-		v.Sync.FromHost.CSIStorageCapacities.Enabled = false
+	if v.Sync.FromHost.CSIStorageCapacities.Enabled != "false" && !findResource(resources, "csistoragecapacities") {
+		v.Sync.FromHost.CSIStorageCapacities.Enabled = "false"
 		klog.Warningf("host kubernetes apiserver not advertising resource csistoragecapacities in GroupVersion storage.k8s.io/v1, disabling the syncer")
 	}
 

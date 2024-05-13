@@ -4,3 +4,4 @@ examples/**/test/
 /test
 .devspace/
 .DS_Store
+e2e/test_plugin/test_plugin

@@ -161,7 +161,7 @@ func (m *manager) InitWithOptions(options Options) (*synccontext.RegisterContext
 	virtualClusterConfig.Plugins = map[string]config2.Plugins{}
 
 	// init virtual cluster config
-	err = setup.InitConfig(virtualClusterConfig)
+	err = setup.InitAndValidateConfig(ctx, virtualClusterConfig)
 	if err != nil {
 		return nil, fmt.Errorf("init config: %w", err)
 	}

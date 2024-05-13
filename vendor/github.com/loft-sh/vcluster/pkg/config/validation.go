@@ -45,11 +45,17 @@ func ValidateConfigAndSetDefaults(config *VirtualClusterConfig) error {
 
 	// enable additional controllers required for scheduling with storage
 	if config.ControlPlane.Advanced.VirtualScheduler.Enabled && config.Sync.ToHost.PersistentVolumeClaims.Enabled {
-		config.Sync.FromHost.CSINodes.Enabled = true
-		config.Sync.FromHost.CSIStorageCapacities.Enabled = true
-		config.Sync.FromHost.CSIDrivers.Enabled = true
-		if !config.Sync.FromHost.StorageClasses.Enabled && !config.Sync.ToHost.StorageClasses.Enabled {
-			config.Sync.FromHost.StorageClasses.Enabled = true
+		if config.Sync.FromHost.CSINodes.Enabled == "auto" {
+			config.Sync.FromHost.CSINodes.Enabled = "true"
+		}
+		if config.Sync.FromHost.CSIStorageCapacities.Enabled == "auto" {
+			config.Sync.FromHost.CSIStorageCapacities.Enabled = "true"
+		}
+		if config.Sync.FromHost.CSIDrivers.Enabled == "auto" {
+			config.Sync.FromHost.CSIDrivers.Enabled = "true"
+		}
+		if config.Sync.FromHost.StorageClasses.Enabled == "auto" && !config.Sync.ToHost.StorageClasses.Enabled {
+			config.Sync.FromHost.StorageClasses.Enabled = "true"
 		}
 	}
 
@@ -59,7 +65,7 @@ func ValidateConfigAndSetDefaults(config *VirtualClusterConfig) error {
 	}
 
 	// check if storage classes and host storage classes are enabled at the same time
-	if config.Sync.FromHost.StorageClasses.Enabled && config.Sync.ToHost.StorageClasses.Enabled {
+	if config.Sync.FromHost.StorageClasses.Enabled == "true" && config.Sync.ToHost.StorageClasses.Enabled {
 		return fmt.Errorf("you cannot enable both sync.fromHost.storageClasses.enabled and sync.toHost.storageClasses.enabled at the same time. Choose only one of them")
 	}
 
@@ -77,6 +83,11 @@ func ValidateConfigAndSetDefaults(config *VirtualClusterConfig) error {
 
 	// validate distro
 	err = validateDistro(config)
+	if err != nil {
+		return err
+	}
+
+	err = validateK0sAndNoExperimentalKubeconfig(config)
 	if err != nil {
 		return err
 	}
@@ -435,6 +446,18 @@ func validateWildcardOrAny(values []string) error {
 		if val == "*" {
 			return fmt.Errorf("when wildcard(*) is used, it must be the only value in the list")
 		}
+	}
+	return nil
+}
+
+func validateK0sAndNoExperimentalKubeconfig(c *VirtualClusterConfig) error {
+	if c.Distro() != config.K0SDistro {
+		return nil
+	}
+	virtualclusterconfig := c.Experimental.VirtualClusterKubeConfig
+	empty := config.VirtualClusterKubeConfig{}
+	if virtualclusterconfig != empty {
+		return errors.New("config.experimental.VirtualClusterConfig cannot be set for k0s")
 	}
 	return nil
 }
