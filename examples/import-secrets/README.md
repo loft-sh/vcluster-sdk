@@ -61,7 +61,7 @@ Before starting to develop, make sure you have installed the following tools on 
 - [docker](https://docs.docker.com/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) with a valid kube context configured
 - [helm](https://helm.sh/docs/intro/install/), which is used to deploy vcluster and the plugin
-- [vcluster CLI](https://www.vcluster.com/docs/getting-started/setup) v0.6.0 or higher
+- [vcluster CLI](https://www.vcluster.com/docs/getting-started/setup) v0.20.0 or higher
 - [DevSpace](https://devspace.sh/cli/docs/quickstart), which is used to spin up a development environment
 
 After successfully setting up the tools, start the development environment with:

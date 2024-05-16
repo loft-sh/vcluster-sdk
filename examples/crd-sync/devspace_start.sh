@@ -7,8 +7,10 @@ COLOR_RESET="\033[0m"
 if [ ! -f "/vcluster/syncer" ]; then
   echo "Downloading vCluster syncer..."
   mkdir -p /vcluster
-  curl -L -o /vcluster/syncer "https://github.com/loft-sh/vcluster/releases/download/v0.19.0-beta.2/syncer-linux-$(go env GOARCH)"
+  curl -L -o /vcluster/syncer "https://github.com/loft-sh/vcluster/releases/download/v0.20.0-beta.5/syncer-linux-$(go env GOARCH)"
+  curl -L -o /usr/local/bin/kine "https://github.com/k3s-io/kine/releases/download/v0.11.9/kine-$(go env GOARCH)"
   chmod +x /vcluster/syncer
+  chmod +x /usr/local/bin/kine
   echo "Successfully downloaded syncer"
 fi
 
