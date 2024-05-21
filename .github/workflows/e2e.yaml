@@ -9,6 +9,7 @@ on:
       - "!**_test.go" # exclude test files to ignore unit test changes
       - "test/**" # include test files in e2e again
       - "!**.md"
+      - "examples/**"
       - ".github/workflows/e2e.yaml"
 
 concurrency:
