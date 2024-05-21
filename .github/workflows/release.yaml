@@ -45,51 +45,51 @@ jobs:
           username: loft-sh
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push the hooks
-        working-directory: ./examples/hooks
-        id: docker_build
         uses: docker/build-push-action@v4
+        id: docker_build_hooks
         with:
-          file: Dockerfile
+          file: ./examples/hooks/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: "ghcr.io/loft-sh/vcluster-example-hooks:${{steps.get_version.outputs.release_version}}"
           labels: ${{ steps.docker_meta.outputs.labels }}
+          context: ./examples/hooks
       - name: Images digests for 
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        run: echo ${{ steps.docker_build_hooks.outputs.digest }}
       - name: Build and push the bootstrap
-        id: docker_build
-        working-directory: ./examples/bootstrap-with-deployment
         uses: docker/build-push-action@v4
+        id: docker_build_bootstrap
         with:
-          file: Dockerfile
+          file: ./examples/bootstrap-with-deployment/Dockerfile
+          context: ./examples/bootstrap-with-deployment
           platforms: linux/amd64,linux/arm64
           push: true
           tags: "ghcr.io/loft-sh/vcluster-example-bootstrap-bootstrap-with-deployment:${{steps.get_version.outputs.release_version}}"
           labels: ${{ steps.docker_meta.outputs.labels }}
       - name: Images digests for bootstrap
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        run: echo ${{ steps.docker_build_bootstrap.outputs.digest }}
       - name: Build and push import secret
-        working-directory: ./examples/import-secrets
-        id: docker_build
         uses: docker/build-push-action@v4
+        id: docker_build_import_secret
         with:
-          file: Dockerfile
+          file: ./examples/import-secrets/Dockerfile
+          context:  ./examples/import-secrets
           platforms: linux/amd64,linux/arm64
           push: true
           tags: "ghcr.io/loft-sh/vcluster-example-import-secrets:${{steps.get_version.outputs.release_version}}"
           labels: ${{ steps.docker_meta.outputs.labels }}
       - name: Images digests for import secret
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        run: echo ${{ steps.docker_build_import_secret.outputs.digest }}
       - name: Build and push crd sync
-        working-directory: ./examples/crd-sync
-        id: docker_build
         uses: docker/build-push-action@v4
+        id: docker_build_crd_sync
         with:
-          file: Dockerfile
+          file: ./examples/crd-sync/Dockerfile
+          context: ./examples/crd-sync/
           platforms: linux/amd64,linux/arm64
           push: true
           tags: "ghcr.io/loft-sh/vcluster-example-crd-sync:${{steps.get_version.outputs.release_version}}"
           labels: ${{ steps.docker_meta.outputs.labels }}
       - name: Images digests for crd sync
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        run: echo ${{ steps.docker_build_crd_sync.outputs.digest }}
 
