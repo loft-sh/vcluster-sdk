@@ -37,6 +37,11 @@ type Manager interface {
 	// will stop if the pod will lose leader election.
 	Start() error
 
+	// Start runs all the registered syncers and will block. It only executes
+	// the functionality if the current vcluster pod is the current leader and
+	// will stop if the pod will lose leader election.
+	StartAsync() (<-chan struct{}, error)
+
 	// UnmarshalConfig retrieves the plugin config from environment and parses it into
 	// the given object.
 	UnmarshalConfig(into interface{}) error
