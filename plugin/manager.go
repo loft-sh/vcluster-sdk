@@ -209,6 +209,15 @@ func (m *manager) Start() error {
 	return nil
 }
 
+func (m *manager) StartAsync() (<-chan struct{}, error) {
+	err := m.start()
+	if err != nil {
+		return nil, err
+	}
+
+	return m.context.Context.Done(), nil
+}
+
 func (m *manager) startInterceptors() error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerName := r.Header.Get("VCluster-Plugin-Handler-Name")

@@ -56,6 +56,10 @@ func Start() error {
 	return defaultManager.Start()
 }
 
+func StartAsync() (<-chan struct{}, error) {
+	return defaultManager.StartAsync()
+}
+
 func UnmarshalConfig(into interface{}) error {
 	return defaultManager.UnmarshalConfig(into)
 }
