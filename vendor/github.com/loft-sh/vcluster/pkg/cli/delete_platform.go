@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/loft-sh/loftctl/v4/pkg/kube"
 	"github.com/loft-sh/log"
+	"github.com/loft-sh/vcluster/pkg/cli/config"
 	"github.com/loft-sh/vcluster/pkg/cli/find"
 	"github.com/loft-sh/vcluster/pkg/platform"
+	"github.com/loft-sh/vcluster/pkg/platform/kube"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func DeletePlatform(ctx context.Context, options *DeleteOptions, vClusterName string, log log.Logger) error {
-	platformClient, err := platform.CreatePlatformClient()
+func DeletePlatform(ctx context.Context, options *DeleteOptions, config *config.CLI, vClusterName string, log log.Logger) error {
+	platformClient, err := platform.InitClientFromConfig(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -23,8 +24,8 @@ func DeletePlatform(ctx context.Context, options *DeleteOptions, vClusterName st
 	vCluster, err := find.GetPlatformVCluster(ctx, platformClient, vClusterName, options.Project, log)
 	if err != nil {
 		return err
-	} else if vCluster.VirtualCluster != nil && vCluster.VirtualCluster.Spec.NetworkPeer {
-		return fmt.Errorf("cannot delete a virtual cluster that was created via helm, please run 'vcluster use manager helm' or use the '--manager helm' flag")
+	} else if vCluster.VirtualCluster != nil && vCluster.VirtualCluster.Spec.External {
+		return fmt.Errorf("cannot delete a virtual cluster that was created via helm, please run 'vcluster use driver helm' or use the '--driver helm' flag")
 	}
 
 	managementClient, err := platformClient.Management()
@@ -41,9 +42,11 @@ func DeletePlatform(ctx context.Context, options *DeleteOptions, vClusterName st
 	log.Donef("Successfully deleted virtual cluster %s in project %s", vCluster.VirtualCluster.Name, vCluster.Project.Name)
 
 	// update kube config
-	err = deletePlatformContext(vCluster.VirtualCluster.Name, vCluster.Project.Name)
-	if err != nil {
-		return fmt.Errorf("delete kube context: %w", err)
+	if options.DeleteContext {
+		err = deletePlatformContext(vCluster.VirtualCluster.Name, vCluster.Project.Name)
+		if err != nil {
+			return fmt.Errorf("delete kube context: %w", err)
+		}
 	}
 
 	// wait until deleted

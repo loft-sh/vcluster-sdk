@@ -37,7 +37,7 @@ import (
 )
 
 type ConnectOptions struct {
-	Manager string
+	Driver string
 
 	ServiceAccountClusterRole string
 	PodName                   string
@@ -98,16 +98,6 @@ func (cmd *connectHelm) connect(ctx context.Context, vCluster *find.VCluster, co
 	kubeConfig, err := cmd.getVClusterKubeConfig(ctx, vCluster.Name, command)
 	if err != nil {
 		return err
-	}
-
-	if len(command) == 0 && cmd.ServiceAccount == "" && cmd.Server == "" && cmd.BackgroundProxy && localkubernetes.IsDockerInstalledAndUpAndRunning() {
-		// start background container
-		server, err := localkubernetes.CreateBackgroundProxyContainer(ctx, vCluster.Name, cmd.Namespace, &cmd.rawConfig, kubeConfig, cmd.LocalPort, cmd.Log)
-		if err != nil {
-			cmd.Log.Warnf("Error exposing local vcluster, will fallback to port-forwarding: %v", err)
-			cmd.BackgroundProxy = false
-		}
-		cmd.Server = server
 	}
 
 	// check if we should execute command
@@ -326,6 +316,21 @@ func (cmd *connectHelm) getVClusterKubeConfig(ctx context.Context, vclusterName 
 		err = cmd.setServerIfExposed(ctx, vclusterName, kubeConfig)
 		if err != nil {
 			return nil, err
+		}
+
+		// check if we should start a background proxy
+		if cmd.Server == "" && cmd.BackgroundProxy {
+			if localkubernetes.IsDockerInstalledAndUpAndRunning() {
+				// start background container
+				server, err := localkubernetes.CreateBackgroundProxyContainer(ctx, vclusterName, cmd.Namespace, cmd.kubeClientConfig, kubeConfig, cmd.LocalPort, cmd.Log)
+				if err != nil {
+					cmd.Log.Warnf("Error exposing local vcluster, will fallback to port-forwarding: %v", err)
+					cmd.BackgroundProxy = false
+				}
+				cmd.Server = server
+			} else {
+				cmd.Log.Debugf("Docker is not installed, so skip background proxy")
+			}
 		}
 	}
 
@@ -573,9 +578,14 @@ func executeCommand(vKubeConfig clientcmdapi.Config, command []string, errorChan
 func getLocalVClusterConfig(vKubeConfig clientcmdapi.Config, options *ConnectOptions) clientcmdapi.Config {
 	// wait until we can access the virtual cluster
 	vKubeConfig = *vKubeConfig.DeepCopy()
-	for k := range vKubeConfig.Clusters {
-		vKubeConfig.Clusters[k].Server = "https://localhost:" + strconv.Itoa(options.LocalPort)
+
+	// update vCluster server address in case of OSS vClusters only
+	if options.LocalPort != 0 {
+		for k := range vKubeConfig.Clusters {
+			vKubeConfig.Clusters[k].Server = "https://localhost:" + strconv.Itoa(options.LocalPort)
+		}
 	}
+
 	return vKubeConfig
 }
 

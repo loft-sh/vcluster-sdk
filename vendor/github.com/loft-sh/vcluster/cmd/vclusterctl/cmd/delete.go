@@ -1,10 +1,17 @@
 package cmd
 
 import (
-	loftctlUtil "github.com/loft-sh/loftctl/v4/pkg/util"
+	"cmp"
+	"context"
+	"fmt"
+
 	"github.com/loft-sh/log"
 	"github.com/loft-sh/vcluster/pkg/cli"
+	"github.com/loft-sh/vcluster/pkg/cli/completion"
+	"github.com/loft-sh/vcluster/pkg/cli/config"
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
+	flagsdelete "github.com/loft-sh/vcluster/pkg/cli/flags/delete"
+	"github.com/loft-sh/vcluster/pkg/cli/util"
 	"github.com/loft-sh/vcluster/pkg/platform"
 	"github.com/spf13/cobra"
 )
@@ -25,10 +32,9 @@ func NewDeleteCmd(globalFlags *flags.GlobalFlags) *cobra.Command {
 	}
 
 	cobraCmd := &cobra.Command{
-		Use:   "delete" + loftctlUtil.VClusterNameOnlyUseLine,
+		Use:   "delete" + util.VClusterNameOnlyUseLine,
 		Short: "Deletes a virtual cluster",
-		Long: `
-#######################################################
+		Long: `#######################################################
 ################### vcluster delete ###################
 #######################################################
 Deletes a virtual cluster
@@ -37,42 +43,42 @@ Example:
 vcluster delete test --namespace test
 #######################################################
 	`,
-		Args:              loftctlUtil.VClusterNameOnlyValidator,
+		Args:              util.VClusterNameOnlyValidator,
 		Aliases:           []string{"rm"},
-		ValidArgsFunction: newValidVClusterNameFunc(globalFlags),
+		ValidArgsFunction: completion.NewValidVClusterNameFunc(globalFlags),
 		RunE: func(cobraCmd *cobra.Command, args []string) error {
-			return cmd.Run(cobraCmd, args)
+			return cmd.Run(cobraCmd.Context(), args)
 		},
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Manager, "manager", "", "The manager to use for managing the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm or platform.")
 
-	cobraCmd.Flags().BoolVar(&cmd.Wait, "wait", true, "If enabled, vcluster will wait until the vcluster is deleted")
-	cobraCmd.Flags().BoolVar(&cmd.DeleteConfigMap, "delete-configmap", false, "If enabled, vCluster will delete the ConfigMap of the vCluster")
-	cobraCmd.Flags().BoolVar(&cmd.KeepPVC, "keep-pvc", false, "If enabled, vcluster will not delete the persistent volume claim of the vcluster")
-	cobraCmd.Flags().BoolVar(&cmd.DeleteNamespace, "delete-namespace", false, "If enabled, vcluster will delete the namespace of the vcluster. In the case of multi-namespace mode, will also delete all other namespaces created by vcluster")
-	cobraCmd.Flags().BoolVar(&cmd.AutoDeleteNamespace, "auto-delete-namespace", true, "If enabled, vcluster will delete the namespace of the vcluster if it was created by vclusterctl. In the case of multi-namespace mode, will also delete all other namespaces created by vcluster")
-	cobraCmd.Flags().BoolVar(&cmd.IgnoreNotFound, "ignore-not-found", false, "If enabled, vcluster will not error out in case the target vcluster does not exist")
-
-	// Platform flags
-	cobraCmd.Flags().StringVar(&cmd.Project, "project", "", "[Platform] The vCluster platform project to use")
+	flagsdelete.AddCommonFlags(cobraCmd, &cmd.DeleteOptions)
+	flagsdelete.AddHelmFlags(cobraCmd, &cmd.DeleteOptions)
+	flagsdelete.AddPlatformFlags(cobraCmd, &cmd.DeleteOptions, "[PLATFORM] ")
 
 	return cobraCmd
 }
 
 // Run executes the functionality
-func (cmd *DeleteCmd) Run(cobraCmd *cobra.Command, args []string) error {
-	manager, err := platform.GetManager(cmd.Manager)
+func (cmd *DeleteCmd) Run(ctx context.Context, args []string) error {
+	cfg := cmd.LoadedConfig(cmd.log)
+
+	// If driver has been passed as flag use it, otherwise read it from the config file
+	driverType, err := config.ParseDriverType(cmp.Or(cmd.Driver, string(cfg.Driver.Type)))
 	if err != nil {
-		return err
+		return fmt.Errorf("parse driver type: %w", err)
 	}
 
-	// check if we should delete a platform vCluster
-	platform.PrintManagerInfo("delete", manager, cmd.log)
-	if manager == platform.ManagerPlatform {
-		// deploy platform cluster
-		return cli.DeletePlatform(cobraCmd.Context(), &cmd.DeleteOptions, args[0], cmd.log)
+	// check if there is a platform client or we skip the info message
+	_, err = platform.InitClientFromConfig(ctx, cfg)
+	if err == nil {
+		config.PrintDriverInfo("delete", driverType, cmd.log)
 	}
 
-	return cli.DeleteHelm(cobraCmd.Context(), &cmd.DeleteOptions, cmd.GlobalFlags, args[0], cmd.log)
+	if driverType == config.PlatformDriver {
+		return cli.DeletePlatform(ctx, &cmd.DeleteOptions, cfg, args[0], cmd.log)
+	}
+
+	return cli.DeleteHelm(ctx, &cmd.DeleteOptions, cmd.GlobalFlags, args[0], cmd.log)
 }

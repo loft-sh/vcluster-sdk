@@ -3,6 +3,7 @@ package find
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/loft-sh/log/survey"
 	"github.com/loft-sh/log/terminal"
 	"github.com/loft-sh/vcluster/pkg/platform"
+	"github.com/loft-sh/vcluster/pkg/platform/sleepmode"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/loft-sh/vcluster/pkg/constants"
@@ -26,9 +28,10 @@ import (
 const VirtualClusterSelector = "app=vcluster"
 
 type VCluster struct {
-	Name      string
-	Namespace string
-
+	Name          string
+	Namespace     string
+	Annotations   map[string]string
+	Labels        map[string]string
 	Status        Status
 	Created       metav1.Time
 	Context       string
@@ -67,7 +70,7 @@ func CurrentContext() (string, *clientcmdapi.Config, error) {
 }
 
 func GetPlatformVCluster(ctx context.Context, platformClient platform.Client, name, project string, log log.Logger) (*platform.VirtualClusterInstanceProject, error) {
-	platformVClusters, err := platformClient.ListVClusters(ctx, name, project)
+	platformVClusters, err := platform.ListVClusters(ctx, platformClient, name, project)
 	if err != nil {
 		log.Warnf("Error retrieving platform vclusters: %v", err)
 	}
@@ -76,7 +79,7 @@ func GetPlatformVCluster(ctx context.Context, platformClient platform.Client, na
 	if len(platformVClusters) == 0 {
 		return nil, &VClusterNotFoundError{Name: name}
 	} else if len(platformVClusters) == 1 {
-		return &platformVClusters[0], nil
+		return platformVClusters[0], nil
 	}
 
 	// check if terminal
@@ -102,7 +105,7 @@ func GetPlatformVCluster(ctx context.Context, platformClient platform.Client, na
 	// match answer
 	for idx, s := range questionOptions {
 		if s == selectedVCluster {
-			return &platformVClusters[idx], nil
+			return platformVClusters[idx], nil
 		}
 	}
 
@@ -155,6 +158,20 @@ func GetVCluster(ctx context.Context, context, name, namespace string, log log.L
 	}
 
 	return nil, fmt.Errorf("unexpected error searching for selected virtual cluster")
+}
+
+func (v *VCluster) IsSleeping() bool {
+	return sleepmode.IsSleeping(v)
+}
+
+// GetAnnotations implements Annotated
+func (v *VCluster) GetAnnotations() map[string]string {
+	return v.Annotations
+}
+
+// GetLabels implements Labeled
+func (v *VCluster) GetLabels() map[string]string {
+	return v.Labels
 }
 
 func FormatOptions(format string, options [][]string) []string {
@@ -256,8 +273,10 @@ func VClusterPlatformFromContext(originalContext string) (name string, project s
 	return originalContext, "", ""
 }
 
+var NonAllowedCharactersRegEx = regexp.MustCompile(`[^a-zA-Z0-9\-_]+`)
+
 func VClusterConnectBackgroundProxyName(vClusterName string, vClusterNamespace string, currentContext string) string {
-	return VClusterContextName(vClusterName, vClusterNamespace, currentContext) + "_background_proxy"
+	return NonAllowedCharactersRegEx.ReplaceAllString(VClusterContextName(vClusterName, vClusterNamespace, currentContext)+"_background_proxy", "")
 }
 
 func VClusterFromContext(originalContext string) (name string, namespace string, context string) {
@@ -306,12 +325,7 @@ func findInContext(ctx context.Context, context, name, namespace string, timeout
 				continue
 			}
 
-			var paused string
-
-			if p.Annotations != nil {
-				paused = p.Annotations[constants.PausedAnnotation]
-			}
-			if p.Spec.Replicas != nil && *p.Spec.Replicas == 0 && paused != "true" {
+			if p.Spec.Replicas != nil && *p.Spec.Replicas == 0 && !isPaused(&p) {
 				// if the stateful set has been scaled down we'll ignore it -- this happens when
 				// using devspace to do vcluster plugin dev for example, devspace scales down the
 				// vcluster stateful set and re-creates a deployment for "dev mode" so we end up
@@ -407,6 +421,8 @@ func getVCluster(ctx context.Context, object client.Object, context, release str
 	return VCluster{
 		Name:          release,
 		Namespace:     namespace,
+		Annotations:   object.GetAnnotations(),
+		Labels:        object.GetLabels(),
 		Status:        Status(status),
 		Created:       created,
 		Context:       context,
@@ -554,4 +570,11 @@ func GetPodStatus(pod *corev1.Pod) string {
 		reason = "Terminating"
 	}
 	return reason
+}
+
+func isPaused(v client.Object) bool {
+	annotations := v.GetAnnotations()
+	labels := v.GetLabels()
+
+	return annotations[constants.PausedAnnotation] == "true" || labels[sleepmode.Label] == "true"
 }

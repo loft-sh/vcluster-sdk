@@ -26,8 +26,8 @@ func MigrateLegacyConfig(distro, oldValues string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("migrate legacy %s values: %w", distro, err)
 		}
-	case config.K8SDistro, config.EKSDistro:
-		err = migrateK8sAndEKS(distro, oldValues, toConfig)
+	case config.K8SDistro, "eks":
+		err = migrateK8sAndEKS(oldValues, toConfig)
 		if err != nil {
 			return "", fmt.Errorf("migrate legacy %s values: %w", distro, err)
 		}
@@ -38,7 +38,7 @@ func MigrateLegacyConfig(distro, oldValues string) (string, error) {
 	return config.Diff(fromConfig, toConfig)
 }
 
-func migrateK8sAndEKS(distro, oldValues string, newConfig *config.Config) error {
+func migrateK8sAndEKS(oldValues string, newConfig *config.Config) error {
 	// unmarshal legacy config
 	oldConfig := &LegacyK8s{}
 	err := oldConfig.UnmarshalYAMLStrict([]byte(oldValues))
@@ -46,18 +46,10 @@ func migrateK8sAndEKS(distro, oldValues string, newConfig *config.Config) error 
 		return fmt.Errorf("unmarshal legacy config: %w", err)
 	}
 
-	// k8s specific
-	if distro == config.K8SDistro {
-		newConfig.ControlPlane.Distro.K8S.Enabled = true
-		convertAPIValues(oldConfig.API, &newConfig.ControlPlane.Distro.K8S.APIServer)
-		convertControllerValues(oldConfig.Controller, &newConfig.ControlPlane.Distro.K8S.ControllerManager)
-		convertSchedulerValues(oldConfig.Scheduler, &newConfig.ControlPlane.Distro.K8S.Scheduler)
-	} else if distro == config.EKSDistro {
-		newConfig.ControlPlane.Distro.EKS.Enabled = true
-		convertAPIValues(oldConfig.API, &newConfig.ControlPlane.Distro.EKS.APIServer)
-		convertControllerValues(oldConfig.Controller, &newConfig.ControlPlane.Distro.EKS.ControllerManager)
-		convertSchedulerValues(oldConfig.Scheduler, &newConfig.ControlPlane.Distro.EKS.Scheduler)
-	}
+	newConfig.ControlPlane.Distro.K8S.Enabled = true
+	convertAPIValues(oldConfig.API, &newConfig.ControlPlane.Distro.K8S.APIServer)
+	convertControllerValues(oldConfig.Controller, &newConfig.ControlPlane.Distro.K8S.ControllerManager)
+	convertSchedulerValues(oldConfig.Scheduler, &newConfig.ControlPlane.Distro.K8S.Scheduler)
 
 	// convert etcd
 	err = convertEtcd(oldConfig.Etcd, newConfig)
@@ -158,7 +150,7 @@ func convertEtcd(oldConfig EtcdValues, newConfig *config.Config) error {
 	}
 	newConfig.ControlPlane.BackingStore.Etcd.Deploy.StatefulSet.ExtraArgs = oldConfig.ExtraArgs
 	if oldConfig.Resources != nil {
-		newConfig.ControlPlane.BackingStore.Etcd.Deploy.StatefulSet.Resources = *oldConfig.Resources
+		newConfig.ControlPlane.BackingStore.Etcd.Deploy.StatefulSet.Resources = mergeResources(newConfig.ControlPlane.BackingStore.Etcd.Deploy.StatefulSet.Resources, *oldConfig.Resources)
 	}
 	newConfig.ControlPlane.BackingStore.Etcd.Deploy.StatefulSet.Persistence.AddVolumes = oldConfig.Volumes
 	if oldConfig.PriorityClassName != "" {
@@ -238,10 +230,24 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	newConfig.Pro = oldConfig.Pro
 	if strings.Contains(oldConfig.ProLicenseSecret, "/") {
 		splitted := strings.Split(oldConfig.ProLicenseSecret, "/")
-		newConfig.Platform.API.SecretRef.Namespace = splitted[0]
-		newConfig.Platform.API.SecretRef.Name = splitted[1]
+		err := newConfig.SetPlatformConfig(&config.PlatformConfig{
+			APIKey: config.PlatformAPIKey{
+				SecretName: splitted[1],
+				Namespace:  splitted[0],
+			},
+		})
+		if err != nil {
+			return err
+		}
 	} else {
-		newConfig.Platform.API.SecretRef.Name = oldConfig.ProLicenseSecret
+		err := newConfig.SetPlatformConfig(&config.PlatformConfig{
+			APIKey: config.PlatformAPIKey{
+				SecretName: oldConfig.ProLicenseSecret,
+			},
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	newConfig.Experimental.IsolatedControlPlane.Headless = oldConfig.Headless
@@ -268,10 +274,12 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	newConfig.Networking.ReplicateServices.ToHost = oldConfig.MapServices.FromVirtual
 
 	if oldConfig.Proxy.MetricsServer.Pods.Enabled != nil {
-		newConfig.Observability.Metrics.Proxy.Pods = *oldConfig.Proxy.MetricsServer.Pods.Enabled
+		newConfig.Integrations.MetricsServer.Enabled = true
+		newConfig.Integrations.MetricsServer.Pods = *oldConfig.Proxy.MetricsServer.Pods.Enabled
 	}
 	if oldConfig.Proxy.MetricsServer.Nodes.Enabled != nil {
-		newConfig.Observability.Metrics.Proxy.Nodes = *oldConfig.Proxy.MetricsServer.Nodes.Enabled
+		newConfig.Integrations.MetricsServer.Enabled = true
+		newConfig.Integrations.MetricsServer.Nodes = *oldConfig.Proxy.MetricsServer.Nodes.Enabled
 	}
 
 	if len(oldConfig.Volumes) > 0 {
@@ -366,9 +374,9 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 		newConfig.Experimental.SyncSettings.RewriteKubernetesService = oldConfig.NoopSyncer.Synck8sService
 	}
 
-	newConfig.Experimental.Deploy.Manifests = oldConfig.Init.Manifests
-	newConfig.Experimental.Deploy.ManifestsTemplate = oldConfig.Init.ManifestsTemplate
-	newConfig.Experimental.Deploy.Helm = oldConfig.Init.Helm
+	newConfig.Experimental.Deploy.VCluster.Manifests = oldConfig.Init.Manifests
+	newConfig.Experimental.Deploy.VCluster.ManifestsTemplate = oldConfig.Init.ManifestsTemplate
+	newConfig.Experimental.Deploy.VCluster.Helm = oldConfig.Init.Helm
 
 	if oldConfig.Isolation.Enabled {
 		if oldConfig.Isolation.NetworkPolicy.Enabled != nil {
@@ -377,14 +385,14 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 			newConfig.Policies.NetworkPolicy.Enabled = true
 		}
 		if oldConfig.Isolation.ResourceQuota.Enabled != nil {
-			newConfig.Policies.ResourceQuota.Enabled = *oldConfig.Isolation.ResourceQuota.Enabled
+			newConfig.Policies.ResourceQuota.Enabled = config.StrBool(strconv.FormatBool(*oldConfig.Isolation.ResourceQuota.Enabled))
 		} else {
-			newConfig.Policies.ResourceQuota.Enabled = true
+			newConfig.Policies.ResourceQuota.Enabled = "true"
 		}
 		if oldConfig.Isolation.LimitRange.Enabled != nil {
-			newConfig.Policies.LimitRange.Enabled = *oldConfig.Isolation.LimitRange.Enabled
+			newConfig.Policies.LimitRange.Enabled = config.StrBool(strconv.FormatBool(*oldConfig.Isolation.LimitRange.Enabled))
 		} else {
-			newConfig.Policies.LimitRange.Enabled = true
+			newConfig.Policies.LimitRange.Enabled = "true"
 		}
 		if oldConfig.Isolation.PodSecurityStandard == "" {
 			newConfig.Policies.PodSecurityStandard = "baseline"
@@ -400,19 +408,19 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 		}
 
 		if len(oldConfig.Isolation.LimitRange.Default) > 0 {
-			newConfig.Policies.LimitRange.Default = oldConfig.Isolation.LimitRange.Default
+			newConfig.Policies.LimitRange.Default = mergeMaps(newConfig.Policies.LimitRange.Default, oldConfig.Isolation.LimitRange.Default)
 		}
 		if len(oldConfig.Isolation.LimitRange.DefaultRequest) > 0 {
-			newConfig.Policies.LimitRange.DefaultRequest = oldConfig.Isolation.LimitRange.DefaultRequest
+			newConfig.Policies.LimitRange.DefaultRequest = mergeMaps(newConfig.Policies.LimitRange.DefaultRequest, oldConfig.Isolation.LimitRange.DefaultRequest)
 		}
 		if len(oldConfig.Isolation.ResourceQuota.Quota) > 0 {
-			newConfig.Policies.ResourceQuota.Quota = oldConfig.Isolation.ResourceQuota.Quota
+			newConfig.Policies.ResourceQuota.Quota = mergeMaps(newConfig.Policies.ResourceQuota.Quota, oldConfig.Isolation.ResourceQuota.Quota)
 		}
 		if len(oldConfig.Isolation.ResourceQuota.Scopes) > 0 {
 			newConfig.Policies.ResourceQuota.Scopes = oldConfig.Isolation.ResourceQuota.Scopes
 		}
 		if len(oldConfig.Isolation.ResourceQuota.ScopeSelector) > 0 {
-			newConfig.Policies.ResourceQuota.ScopeSelector = oldConfig.Isolation.ResourceQuota.ScopeSelector
+			newConfig.Policies.ResourceQuota.ScopeSelector = mergeMaps(newConfig.Policies.ResourceQuota.ScopeSelector, oldConfig.Isolation.ResourceQuota.ScopeSelector)
 		}
 
 		if oldConfig.Isolation.Namespace != nil {
@@ -447,7 +455,7 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 	newConfig.ControlPlane.CoreDNS.Deployment.Pods.Labels = oldConfig.Coredns.PodLabels
 	newConfig.ControlPlane.CoreDNS.Deployment.Pods.Annotations = oldConfig.Coredns.PodAnnotations
 	if oldConfig.Coredns.Resources != nil {
-		newConfig.ControlPlane.CoreDNS.Deployment.Resources = *oldConfig.Coredns.Resources
+		newConfig.ControlPlane.CoreDNS.Deployment.Resources = mergeResources(newConfig.ControlPlane.CoreDNS.Deployment.Resources, *oldConfig.Coredns.Resources)
 	}
 	if oldConfig.Coredns.Plugin.Enabled {
 		if len(oldConfig.Coredns.Plugin.Config) > 0 {
@@ -695,7 +703,7 @@ func convertSyncerConfig(oldConfig SyncerValues, newConfig *config.Config) error
 		return fmt.Errorf("syncer.volumeMounts is not allowed anymore, please remove this field or use syncer.extraVolumeMounts")
 	}
 	if len(oldConfig.Resources.Limits) > 0 || len(oldConfig.Resources.Requests) > 0 {
-		newConfig.ControlPlane.StatefulSet.Resources = oldConfig.Resources
+		newConfig.ControlPlane.StatefulSet.Resources = mergeResources(newConfig.ControlPlane.StatefulSet.Resources, oldConfig.Resources)
 	}
 
 	newConfig.ControlPlane.Service.Annotations = oldConfig.ServiceAnnotations
@@ -989,7 +997,7 @@ func migrateFlag(key, value string, newConfig *config.Config) error {
 			return fmt.Errorf("value is missing")
 		}
 		newConfig.Experimental.SyncSettings.VirtualMetricsBindAddress = value
-	case "mount-physical-host-paths":
+	case "mount-physical-host-paths", "rewrite-host-paths":
 		if value == "" || value == "true" {
 			newConfig.ControlPlane.HostPathMapper.Enabled = true
 		}
@@ -1012,8 +1020,9 @@ func migrateFlag(key, value string, newConfig *config.Config) error {
 		}
 	case "proxy-metrics-server":
 		if value == "" || value == "true" {
-			newConfig.Observability.Metrics.Proxy.Pods = true
-			newConfig.Observability.Metrics.Proxy.Nodes = true
+			newConfig.Integrations.MetricsServer.Enabled = true
+			newConfig.Integrations.MetricsServer.Pods = true
+			newConfig.Integrations.MetricsServer.Nodes = true
 		}
 	case "service-account-token-secrets":
 		if value == "" || value == "true" {
@@ -1040,13 +1049,16 @@ func applyStorage(oldConfig Storage, newConfig *config.Config) {
 	if oldConfig.ClassName != "" {
 		newConfig.ControlPlane.StatefulSet.Persistence.VolumeClaim.StorageClass = oldConfig.ClassName
 	}
+	if oldConfig.BinariesVolume != nil {
+		newConfig.ControlPlane.StatefulSet.Persistence.BinariesVolume = oldConfig.BinariesVolume
+	}
 }
 
 func convertVClusterConfig(oldConfig VClusterValues, retDistroCommon *config.DistroCommon, retDistroContainer *config.DistroContainer, newConfig *config.Config) error {
 	retDistroCommon.Env = oldConfig.Env
 	convertImage(oldConfig.Image, &retDistroContainer.Image)
 	if len(oldConfig.Resources) > 0 {
-		retDistroCommon.Resources = oldConfig.Resources
+		retDistroCommon.Resources = mergeMaps(retDistroCommon.Resources, oldConfig.Resources)
 	}
 	retDistroContainer.ExtraArgs = append(retDistroContainer.ExtraArgs, oldConfig.ExtraArgs...)
 	if oldConfig.ImagePullPolicy != "" {
@@ -1131,4 +1143,25 @@ func convertObject(from, to interface{}) error {
 	}
 
 	return json.Unmarshal(out, to)
+}
+
+func mergeResources(from, to config.Resources) config.Resources {
+	return config.Resources{
+		Limits:   mergeMaps(from.Limits, to.Limits),
+		Requests: mergeMaps(from.Requests, to.Requests),
+	}
+}
+
+func mergeMaps(from, to map[string]interface{}) map[string]interface{} {
+	if from == nil && to == nil {
+		return nil
+	}
+	retMap := map[string]interface{}{}
+	for k, v := range from {
+		retMap[k] = v
+	}
+	for k, v := range to {
+		retMap[k] = v
+	}
+	return retMap
 }

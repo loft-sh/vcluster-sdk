@@ -200,23 +200,25 @@ func NewServer(ctx *config.ControllerContext, requestHeaderCaFile, clientCaFile 
 	}
 
 	h := handler.ImpersonatingHandler("", virtualConfig)
+
+	// pre hooks
+	clients := config.Clients{
+		UncachedVirtualClient: uncachedVirtualClient,
+		CachedVirtualClient:   cachedVirtualClient,
+		UncachedHostClient:    uncachedLocalClient,
+		CachedHostClient:      cachedLocalClient,
+		HostConfig:            localConfig,
+		VirtualConfig:         virtualConfig,
+	}
+	for _, f := range ctx.PreServerHooks {
+		h = f(h, clients)
+	}
+
 	h = filters.WithServiceCreateRedirect(h, uncachedLocalClient, uncachedVirtualClient, virtualConfig, ctx.Config.Experimental.SyncSettings.SyncLabels)
 	h = filters.WithRedirect(h, localConfig, uncachedLocalClient.Scheme(), uncachedVirtualClient, admissionHandler, s.redirectResources)
 	h = filters.WithMetricsProxy(h, localConfig, cachedVirtualClient)
 
-	// is metrics proxy enabled?
-	if ctx.Config.Observability.Metrics.Proxy.Nodes || ctx.Config.Observability.Metrics.Proxy.Pods {
-		h = filters.WithMetricsServerProxy(
-			h,
-			ctx.Config.WorkloadTargetNamespace,
-			cachedLocalClient,
-			cachedVirtualClient,
-			localConfig,
-			virtualConfig,
-			ctx.Config.Experimental.MultiNamespaceMode.Enabled,
-		)
-	}
-
+	// inject apis
 	if ctx.Config.Sync.FromHost.Nodes.Enabled && ctx.Config.Sync.FromHost.Nodes.SyncBackChanges {
 		h = filters.WithNodeChanges(ctx.Context, h, uncachedLocalClient, uncachedVirtualClient, virtualConfig)
 	}
@@ -227,16 +229,12 @@ func NewServer(ctx *config.ControllerContext, requestHeaderCaFile, clientCaFile 
 		h = filters.WithPprof(h)
 	}
 
-	for _, f := range ctx.AdditionalServerFilters {
-		h = f(h)
-	}
-
-	for _, handler := range ctx.ExtraHandlers {
-		h = handler(h)
+	// post hooks
+	for _, f := range ctx.PostServerHooks {
+		h = f(h, clients)
 	}
 
 	serverhelper.HandleRoute(s.handler, "/", h)
-
 	return s, nil
 }
 
@@ -481,7 +479,7 @@ func initAdmission(ctx context.Context, vConfig *rest.Config) (admission.Interfa
 		&emptyConfigProvider{},
 		admission.PluginInitializers{
 			webhookinit.NewPluginInitializer(authInfoResolverWrapper, serviceResolver),
-			initializer.New(vClient, nil, kubeInformerFactory, nil, nil, nil),
+			initializer.New(vClient, nil, kubeInformerFactory, nil, nil, nil, nil),
 		},
 		nil,
 	)

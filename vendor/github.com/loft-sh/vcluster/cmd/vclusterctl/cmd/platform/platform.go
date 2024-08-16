@@ -1,11 +1,24 @@
 package platform
 
 import (
-	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/loft-sh/log"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/add"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/backup"
 	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/connect"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/create"
+	cmddelete "github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/delete"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/get"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/list"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/set"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/share"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/sleep"
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/wakeup"
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
-	"github.com/loft-sh/vcluster/pkg/platform"
+	"github.com/loft-sh/vcluster/pkg/platform/defaults"
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 )
 
@@ -16,27 +29,44 @@ func NewPlatformCmd(globalFlags *flags.GlobalFlags) (*cobra.Command, error) {
 		Long: `#######################################################
 ################## vcluster platform ##################
 #######################################################
-
-Deprecated, please use vcluster platform instead
 		`,
-		Args: cobra.NoArgs,
+		Args:    cobra.NoArgs,
+		Aliases: []string{"pro"},
+		PersistentPreRun: func(_ *cobra.Command, _ []string) {
+			if len(os.Args) > 1 && os.Args[1] == "pro" {
+				log.GetInstance().Warnf("The \"vcluster pro\" command is deprecated, please use \"vcluster platform\" instead")
+			}
+		},
+	}
+	home, err := homedir.Dir()
+	if err != nil {
+		return nil, err
+	}
+	defaults, err := defaults.NewFromPath(filepath.Join(home, defaults.ConfigFolder), defaults.ConfigFile)
+	if err != nil {
+		return nil, err
 	}
 
-	loftctlGlobalFlags, err := platform.GlobalFlags(globalFlags)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse pro flags: %w", err)
-	}
-
-	startCmd, err := NewStartCmd(loftctlGlobalFlags)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create vcluster platform start command: %w", err)
-	}
+	startCmd := NewStartCmd(globalFlags)
+	loginCmd := NewCobraLoginCmd(globalFlags)
+	logoutCmd := NewLogoutCobraCmd(globalFlags)
 
 	platformCmd.AddCommand(startCmd)
-	platformCmd.AddCommand(NewResetCmd(loftctlGlobalFlags))
-	platformCmd.AddCommand(connect.NewConnectCmd(loftctlGlobalFlags))
-	platformCmd.AddCommand(NewAccessKeyCmd(loftctlGlobalFlags))
-	platformCmd.AddCommand(NewImportCmd(globalFlags))
+	platformCmd.AddCommand(NewResetCmd(globalFlags))
+	platformCmd.AddCommand(add.NewAddCmd(globalFlags))
+	platformCmd.AddCommand(NewAccessKeyCmd(globalFlags))
+	platformCmd.AddCommand(get.NewGetCmd(globalFlags, defaults))
+	platformCmd.AddCommand(connect.NewConnectCmd(globalFlags, defaults))
+	platformCmd.AddCommand(list.NewListCmd(globalFlags, defaults))
+	platformCmd.AddCommand(set.NewSetCmd(globalFlags, defaults))
+	platformCmd.AddCommand(backup.NewBackupCmd(globalFlags))
+	platformCmd.AddCommand(wakeup.NewWakeupCmd(globalFlags, defaults))
+	platformCmd.AddCommand(sleep.NewSleepCmd(globalFlags, defaults))
+	platformCmd.AddCommand(share.NewShareCmd(globalFlags, defaults))
+	platformCmd.AddCommand(create.NewCreateCmd(globalFlags, defaults))
+	platformCmd.AddCommand(cmddelete.NewDeleteCmd(globalFlags, defaults))
+	platformCmd.AddCommand(loginCmd)
+	platformCmd.AddCommand(logoutCmd)
 
 	return platformCmd, nil
 }

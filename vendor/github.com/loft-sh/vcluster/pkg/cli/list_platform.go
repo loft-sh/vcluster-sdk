@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func ListPlatform(ctx context.Context, options *ListOptions, globalFlags *flags.GlobalFlags, logger log.Logger) error {
+func ListPlatform(ctx context.Context, options *ListOptions, globalFlags *flags.GlobalFlags, logger log.Logger, projectName string) error {
 	rawConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(clientcmd.NewDefaultClientConfigLoadingRules(), &clientcmd.ConfigOverrides{}).RawConfig()
 	if err != nil {
 		return err
@@ -22,12 +22,12 @@ func ListPlatform(ctx context.Context, options *ListOptions, globalFlags *flags.
 		globalFlags.Context = currentContext
 	}
 
-	platformClient, err := platform.CreatePlatformClient()
+	platformClient, err := platform.InitClientFromConfig(ctx, globalFlags.LoadedConfig(logger))
 	if err != nil {
 		return err
 	}
 
-	proVClusters, err := platformClient.ListVClusters(ctx, "", "")
+	proVClusters, err := platform.ListVClusters(ctx, platformClient, "", projectName)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func ListPlatform(ctx context.Context, options *ListOptions, globalFlags *flags.
 	return nil
 }
 
-func proToVClusters(vClusters []platform.VirtualClusterInstanceProject, currentContext string) []ListVCluster {
+func proToVClusters(vClusters []*platform.VirtualClusterInstanceProject, currentContext string) []ListVCluster {
 	var output []ListVCluster
 	for _, vCluster := range vClusters {
 		status := string(vCluster.VirtualCluster.Status.Phase)

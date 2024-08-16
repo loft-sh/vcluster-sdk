@@ -1,15 +1,16 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 
 	"github.com/loft-sh/api/v4/pkg/product"
-	"github.com/loft-sh/loftctl/v4/cmd/loftctl/flags"
-	"github.com/loft-sh/loftctl/v4/pkg/client"
 	"github.com/loft-sh/log"
+	"github.com/loft-sh/vcluster/pkg/cli/flags"
+	"github.com/loft-sh/vcluster/pkg/platform"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/pkg/apis/clientauthentication/v1beta1"
@@ -43,19 +44,19 @@ func NewAccessKeyCmd(globalFlags *flags.GlobalFlags) *cobra.Command {
 		Aliases: []string{"token"},
 		Short:   "Prints the access token to a vCluster platform instance",
 		Long: `########################################################
-################## vcluster pro token ##################
+############# vcluster platform token ##################
 ########################################################
 
 Prints an access token to a vCluster platform instance. This
 can be used as an ExecAuthenticator for kubernetes
 
 Example:
-vcluster pro token
+vcluster platform token
 ########################################################
 	`,
 		Args: cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return cmd.Run()
+		RunE: func(cobraCmd *cobra.Command, _ []string) error {
+			return cmd.Run(cobraCmd.Context())
 		},
 	}
 
@@ -66,8 +67,8 @@ vcluster pro token
 }
 
 // Run executes the command
-func (cmd *AccessKeyCmd) Run() error {
-	baseClient, err := client.NewClientFromPath(cmd.Config)
+func (cmd *AccessKeyCmd) Run(ctx context.Context) error {
+	platformClient, err := platform.InitClientFromConfig(ctx, cmd.LoadedConfig(cmd.log))
 	if err != nil {
 		return err
 	}
@@ -79,29 +80,20 @@ func (cmd *AccessKeyCmd) Run() error {
 		tokenFunc = getCertificate
 	}
 
-	return tokenFunc(cmd, baseClient)
+	return tokenFunc(cmd, platformClient)
 }
 
-func getToken(cmd *AccessKeyCmd, baseClient client.Client) error {
+func getToken(_ *AccessKeyCmd, platformClient platform.Client) error {
 	// get config
-	config := baseClient.Config()
+	config := platformClient.Config()
 	if config == nil {
 		return ErrNoConfigLoaded
-	} else if config.Host == "" || config.AccessKey == "" {
+	} else if config.Platform.Host == "" || config.Platform.AccessKey == "" {
 		return fmt.Errorf("%w: please make sure you have run '%s [%s]'", ErrNotLoggedIn, product.LoginCmd(), product.Url())
 	}
 
 	// by default we print the access key as token
-	token := config.AccessKey
-
-	// check if we should print a cluster gateway token instead
-	if cmd.DirectClusterEndpoint {
-		var err error
-		token, err = baseClient.DirectClusterEndpointToken(false)
-		if err != nil {
-			return err
-		}
-	}
+	token := config.Platform.AccessKey
 
 	return printToken(token)
 }
@@ -127,8 +119,8 @@ func printToken(token string) error {
 	return err
 }
 
-func getCertificate(cmd *AccessKeyCmd, baseClient client.Client) error {
-	certificateData, keyData, err := baseClient.VirtualClusterAccessPointCertificate(cmd.Project, cmd.VirtualCluster, false)
+func getCertificate(cmd *AccessKeyCmd, platformClient platform.Client) error {
+	certificateData, keyData, err := platform.VirtualClusterAccessPointCertificate(platformClient, cmd.Project, cmd.VirtualCluster, false)
 	if err != nil {
 		return err
 	}

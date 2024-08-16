@@ -11,7 +11,6 @@ import (
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/services"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	"github.com/loft-sh/vcluster/pkg/coredns"
-	"github.com/loft-sh/vcluster/pkg/metricsapiservice"
 	"github.com/loft-sh/vcluster/pkg/plugin"
 	"github.com/loft-sh/vcluster/pkg/pro"
 	"github.com/loft-sh/vcluster/pkg/specialservices"
@@ -21,7 +20,6 @@ import (
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -135,6 +133,14 @@ func StartControllers(controllerContext *config.ControllerContext) error {
 		return fmt.Errorf("register pro controllers: %w", err)
 	}
 
+	// run leader hooks
+	for _, hook := range controllerContext.AcquiredLeaderHooks {
+		err = hook(controllerContext)
+		if err != nil {
+			return fmt.Errorf("execute controller hook: %w", err)
+		}
+	}
+
 	// write the kube config to secret
 	go func() {
 		wait.Until(func() {
@@ -168,29 +174,6 @@ func ApplyCoreDNS(controllerContext *config.ControllerContext) {
 		klog.Infof("CoreDNS configuration from the manifest file applied successfully")
 		return true, nil
 	})
-}
-
-func SetGlobalOwner(ctx context.Context, currentNamespaceClient client.Client, currentNamespace, targetNamespace string, setOwner bool, serviceName string) error {
-	if currentNamespace != targetNamespace {
-		if setOwner {
-			klog.Warningf("Skip setting owner, because current namespace %s != target namespace %s", currentNamespace, targetNamespace)
-		}
-
-		return nil
-	}
-
-	if setOwner {
-		service := &corev1.Service{}
-		err := currentNamespaceClient.Get(ctx, types.NamespacedName{Namespace: currentNamespace, Name: serviceName}, service)
-		if err != nil {
-			return errors.Wrap(err, "get vcluster service")
-		}
-
-		translate.Owner = service
-		return nil
-	}
-
-	return nil
 }
 
 func SyncKubernetesService(ctx *config.ControllerContext) error {
@@ -257,30 +240,7 @@ func StartManagers(controllerContext *config.ControllerContext, syncers []syncer
 	controllerContext.VirtualManager.GetCache().WaitForCacheSync(controllerContext.Context)
 	klog.Infof("Successfully started local & virtual manager")
 
-	// register APIService
-	go RegisterOrDeregisterAPIService(controllerContext)
-
-	// make sure owner is set if it is there
-	err = SetGlobalOwner(
-		controllerContext.Context,
-		controllerContext.WorkloadNamespaceClient,
-		controllerContext.Config.WorkloadNamespace,
-		controllerContext.Config.WorkloadTargetNamespace,
-		controllerContext.Config.Experimental.SyncSettings.SetOwner,
-		controllerContext.Config.WorkloadService,
-	)
-	if err != nil {
-		return errors.Wrap(err, "finding vcluster pod owner")
-	}
-
 	return nil
-}
-
-func RegisterOrDeregisterAPIService(ctx *config.ControllerContext) {
-	err := metricsapiservice.RegisterOrDeregisterAPIService(ctx)
-	if err != nil {
-		klog.Errorf("Error registering metrics apiservice: %v", err)
-	}
 }
 
 func WriteKubeConfigToSecret(ctx context.Context, currentNamespace string, currentNamespaceClient client.Client, options *config.VirtualClusterConfig, syncerConfig *clientcmdapi.Config) error {
