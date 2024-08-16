@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	DefaultHostsRewriteImage = "library/alpine:3.13.1"
+	DefaultHostsRewriteImage = "library/alpine:3.20"
 )
 
 // VirtualClusterConfig wraps the config and adds extra info such as name, serviceName and targetNamespace
@@ -53,10 +53,6 @@ type VirtualClusterConfig struct {
 	ControlPlaneNamespace string `json:"controlPlaneNamespace,omitempty"`
 }
 
-func (v VirtualClusterConfig) EmbeddedDatabase() bool {
-	return !v.ControlPlane.BackingStore.Database.External.Enabled && !v.ControlPlane.BackingStore.Etcd.Embedded.Enabled && !v.ControlPlane.BackingStore.Etcd.Deploy.Enabled
-}
-
 func (v VirtualClusterConfig) VirtualClusterKubeConfig() config.VirtualClusterKubeConfig {
 	distroConfig := config.VirtualClusterKubeConfig{}
 	switch v.Distro() {
@@ -76,7 +72,7 @@ func (v VirtualClusterConfig) VirtualClusterKubeConfig() config.VirtualClusterKu
 			ClientCACert:        "/data/k0s/pki/ca.crt",
 			RequestHeaderCACert: "/data/k0s/pki/front-proxy-ca.crt",
 		}
-	case config.EKSDistro, config.K8SDistro:
+	case config.K8SDistro:
 		distroConfig = config.VirtualClusterKubeConfig{
 			KubeConfig:          "/data/pki/admin.conf",
 			ServerCAKey:         "/data/pki/ca.key",
@@ -182,7 +178,7 @@ func (v VirtualClusterConfig) LegacyOptions() (*legacyconfig.LegacyVirtualCluste
 		MultiNamespaceMode:          v.Experimental.MultiNamespaceMode.Enabled,
 		SyncAllSecrets:              v.Sync.ToHost.Secrets.All,
 		SyncAllConfigMaps:           v.Sync.ToHost.ConfigMaps.All,
-		ProxyMetricsServer:          v.Observability.Metrics.Proxy.Nodes || v.Observability.Metrics.Proxy.Pods,
+		ProxyMetricsServer:          v.Integrations.MetricsServer.Enabled,
 
 		DeprecatedSyncNodeChanges: v.Sync.FromHost.Nodes.SyncBackChanges,
 	}, nil

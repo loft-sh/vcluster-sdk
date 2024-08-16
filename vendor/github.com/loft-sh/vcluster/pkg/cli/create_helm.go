@@ -28,7 +28,6 @@ import (
 	"github.com/loft-sh/vcluster/pkg/telemetry"
 	"github.com/loft-sh/vcluster/pkg/upgrade"
 	"github.com/loft-sh/vcluster/pkg/util"
-	"github.com/loft-sh/vcluster/pkg/util/cliconfig"
 	"github.com/loft-sh/vcluster/pkg/util/clihelper"
 	"github.com/loft-sh/vcluster/pkg/util/helmdownloader"
 	"golang.org/x/mod/semver"
@@ -44,7 +43,7 @@ import (
 
 // CreateOptions holds the create cmd options
 type CreateOptions struct {
-	Manager string
+	Driver string
 
 	KubeConfigContextName string
 	ChartVersion          string
@@ -54,19 +53,22 @@ type CreateOptions struct {
 	Distro                string
 	Values                []string
 	SetValues             []string
+	Print                 bool
 
 	KubernetesVersion string
 
 	CreateNamespace bool
 	UpdateCurrent   bool
+	BackgroundProxy bool
+	Add             bool
+	CreateContext   bool
+	SwitchContext   bool
 	Expose          bool
 	ExposeLocal     bool
-
-	Connect bool
-	Upgrade bool
+	Connect         bool
+	Upgrade         bool
 
 	// Platform
-	Activate        bool
 	Project         string
 	Cluster         string
 	Template        string
@@ -76,11 +78,18 @@ type CreateOptions struct {
 	Labels          []string
 	Params          string
 	SetParams       []string
+	Description     string
+	DisplayName     string
+	Team            string
+	User            string
+	UseExisting     bool
+	Recreate        bool
+	SkipWait        bool
 }
 
 var CreatedByVClusterAnnotation = "vcluster.loft.sh/created"
 
-var AllowedDistros = []string{config.K8SDistro, config.K3SDistro, config.K0SDistro, config.EKSDistro}
+var AllowedDistros = []string{config.K8SDistro, config.K3SDistro, config.K0SDistro}
 
 type createHelm struct {
 	*flags.GlobalFlags
@@ -93,7 +102,7 @@ type createHelm struct {
 	localCluster     bool
 }
 
-func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.GlobalFlags, vClusterName string, log log.Logger) error {
+func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.GlobalFlags, vClusterName string, log log.Logger, reuseNamespace bool) error {
 	cmd := &createHelm{
 		GlobalFlags:   globalFlags,
 		CreateOptions: options,
@@ -121,6 +130,18 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 	if err != nil {
 		return err
 	}
+	vclusters, err := find.ListVClusters(ctx, cmd.Context, "", cmd.Namespace, log)
+	if err != nil {
+		return err
+	}
+
+	if !reuseNamespace {
+		for _, v := range vclusters {
+			if v.Namespace == cmd.Namespace && v.Name != vClusterName {
+				return fmt.Errorf("there is already a virtual cluster in namespace %s", cmd.Namespace)
+			}
+		}
+	}
 
 	err = cmd.prepare(ctx, vClusterName)
 	if err != nil {
@@ -137,6 +158,7 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 		if isVClusterDeployed(release) {
 			if cmd.Connect {
 				return ConnectHelm(ctx, &ConnectOptions{
+					BackgroundProxy:       cmd.BackgroundProxy,
 					UpdateCurrent:         cmd.UpdateCurrent,
 					KubeConfigContextName: cmd.KubeConfigContextName,
 					KubeConfig:            "./kubeconfig.yaml",
@@ -254,7 +276,25 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 		return err
 	}
 
+	if vClusterConfig.Experimental.IsolatedControlPlane.Headless {
+		cmd.Connect = false
+	}
+
+	if vClusterConfig.IsConfiguredForSleepMode() {
+		if agentDeployed, err := cmd.isLoftAgentDeployed(ctx); err != nil {
+			return fmt.Errorf("is agent deployed: %w", err)
+		} else if !agentDeployed {
+			return fmt.Errorf("sleep mode is configured but requires an agent to be installed on the host cluster. To install the agent using the vCluster CLI, run: vcluster platform add cluster")
+		}
+	}
+
+	err = validateHABackingStoreCompatibility(vClusterConfig)
+	if err != nil {
+		return err
+	}
+	verb := "created"
 	if isVClusterDeployed(release) {
+		verb = "upgraded"
 		// While certain backing store changes are allowed we prohibit changes to another distro.
 		if err := config.ValidateChanges(currentVClusterConfig, vClusterConfig); err != nil {
 			return err
@@ -262,8 +302,8 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 	}
 
 	// create platform secret
-	if cmd.Activate {
-		err = cmd.activateVCluster(ctx, vClusterConfig)
+	if cmd.Add {
+		err = cmd.addVCluster(ctx, vClusterConfig)
 		if err != nil {
 			return err
 		}
@@ -275,20 +315,31 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 		return err
 	}
 
-	// check if we should connect to the vcluster
-	if cmd.Connect {
-		cmd.log.Donef("Successfully created virtual cluster %s in namespace %s", vClusterName, cmd.Namespace)
+	// check if we should connect to the vcluster or print the kubeconfig
+	if cmd.Connect || cmd.Print {
+		cmd.log.Donef("Successfully %s virtual cluster %s in namespace %s", verb, vClusterName, cmd.Namespace)
 		return ConnectHelm(ctx, &ConnectOptions{
+			BackgroundProxy:       cmd.BackgroundProxy,
 			UpdateCurrent:         cmd.UpdateCurrent,
+			Print:                 cmd.Print,
 			KubeConfigContextName: cmd.KubeConfigContextName,
 			KubeConfig:            "./kubeconfig.yaml",
 		}, cmd.GlobalFlags, vClusterName, nil, cmd.log)
 	}
 
 	if cmd.localCluster {
-		cmd.log.Donef("Successfully created virtual cluster %s in namespace %s. \n- Use 'vcluster connect %s --namespace %s' to access the virtual cluster", vClusterName, cmd.Namespace, vClusterName, cmd.Namespace)
+		cmd.log.Donef(
+			"Successfully %s virtual cluster %s in namespace %s. \n"+
+				"- Use 'vcluster connect %s --namespace %s' to access the virtual cluster",
+			verb, vClusterName, cmd.Namespace, vClusterName, cmd.Namespace,
+		)
 	} else {
-		cmd.log.Donef("Successfully created virtual cluster %s in namespace %s. \n- Use 'vcluster connect %s --namespace %s' to access the virtual cluster\n- Use `vcluster connect %s --namespace %s -- kubectl get ns` to run a command directly within the vcluster", vClusterName, cmd.Namespace, vClusterName, cmd.Namespace, vClusterName, cmd.Namespace)
+		cmd.log.Donef(
+			"Successfully %s virtual cluster %s in namespace %s. \n"+
+				"- Use 'vcluster connect %s --namespace %s' to access the virtual cluster\n"+
+				"- Use `vcluster connect %s --namespace %s -- kubectl get ns` to run a command directly within the vcluster",
+			verb, vClusterName, cmd.Namespace, vClusterName, cmd.Namespace, vClusterName, cmd.Namespace,
+		)
 	}
 
 	return nil
@@ -303,9 +354,9 @@ func (cmd *createHelm) parseVClusterYAML(chartValues string) (*config.Config, er
 	// parse config
 	vClusterConfig := &config.Config{}
 	if err := vClusterConfig.UnmarshalYAMLStrict([]byte(finalValues)); err != nil {
-		oldValues, err := mergeAllValues(cmd.SetValues, cmd.Values, "")
-		if err != nil {
-			return nil, fmt.Errorf("merge values: %w", err)
+		oldValues, mergeErr := mergeAllValues(cmd.SetValues, cmd.Values, "")
+		if mergeErr != nil {
+			return nil, fmt.Errorf("merge values: %w", mergeErr)
 		}
 
 		// TODO Delete after vCluster 0.19.x resp. the old config format is out of support.
@@ -313,7 +364,7 @@ func (cmd *createHelm) parseVClusterYAML(chartValues string) (*config.Config, er
 		// We cannot discriminate between k0s/k3s and eks/k8s. So we cannot prompt the actual values to convert, as this would cause false positives,
 		// because users are free to e.g. pass a k0s values file to a currently running k3s virtual cluster.
 		if isLegacyConfig([]byte(oldValues)) {
-			return nil, fmt.Errorf("it appears you are using a vCluster configuration using pre-v0.20 formatting. Please run %q to convert the values to the latest format", "vcluster convert config")
+			return nil, fmt.Errorf("it appears you are using a vCluster configuration using pre-v0.20 formatting. Please run %q to convert the values to the latest format", "vcluster convert config --distro <distro> -f /path/to/vcluster.yaml")
 		}
 
 		// TODO end
@@ -323,27 +374,41 @@ func (cmd *createHelm) parseVClusterYAML(chartValues string) (*config.Config, er
 	return vClusterConfig, nil
 }
 
-func (cmd *createHelm) activateVCluster(ctx context.Context, vClusterConfig *config.Config) error {
-	if vClusterConfig.Platform.API.AccessKey != "" || vClusterConfig.Platform.API.SecretRef.Name != "" {
+func (cmd *createHelm) addVCluster(ctx context.Context, vClusterConfig *config.Config) error {
+	platformConfig, err := vClusterConfig.GetPlatformConfig()
+	if err != nil {
+		return fmt.Errorf("get platform config: %w", err)
+	} else if platformConfig.APIKey.SecretName != "" {
 		return nil
 	}
 
-	platformClient, err := platform.CreatePlatformClient()
+	_, err = platform.InitClientFromConfig(ctx, cmd.LoadedConfig(cmd.log))
 	if err != nil {
 		if vClusterConfig.IsProFeatureEnabled() {
-			return fmt.Errorf("you have vCluster pro features activated, but seems like you are not logged in (%w). Please make sure to log into vCluster Platform to use vCluster pro features or run this command with --activate=false", err)
+			return fmt.Errorf("you have vCluster pro features enabled, but seems like you are not logged in (%w). Please make sure to log into vCluster Platform to use vCluster pro features or run this command with --add=false", err)
 		}
 
 		cmd.log.Debugf("create platform client: %v", err)
 		return nil
 	}
 
-	err = platformClient.ApplyPlatformSecret(ctx, cmd.kubeClient, "", cmd.Namespace, cmd.Project)
+	err = platform.ApplyPlatformSecret(ctx, cmd.LoadedConfig(cmd.log), cmd.kubeClient, "", cmd.Namespace, cmd.Project, "", "", false, cmd.LoadedConfig(cmd.log).Platform.CertificateAuthorityData)
 	if err != nil {
 		return fmt.Errorf("apply platform secret: %w", err)
 	}
 
 	return nil
+}
+
+func (cmd *createHelm) isLoftAgentDeployed(ctx context.Context) (bool, error) {
+	podList, err := cmd.kubeClient.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		LabelSelector: "app=loft",
+	})
+	if err != nil && !kerrors.IsNotFound(err) {
+		return false, err
+	}
+
+	return len(podList.Items) > 0, nil
 }
 
 func isVClusterDeployed(release *helm.Release) bool {
@@ -363,6 +428,16 @@ func isLegacyVCluster(version string) bool {
 		return false
 	}
 	return semver.Compare("v"+version, "v0.20.0-alpha.0") == -1
+}
+
+func validateHABackingStoreCompatibility(config *config.Config) error {
+	if !config.EmbeddedDatabase() {
+		return nil
+	}
+	if !(config.ControlPlane.StatefulSet.HighAvailability.Replicas > 1) {
+		return nil
+	}
+	return fmt.Errorf("cannot use default embedded database (sqlite) in high availability mode. Try embedded etcd backing store instead")
 }
 
 func isLegacyConfig(values []byte) bool {
@@ -455,14 +530,15 @@ func (cmd *createHelm) deployChart(ctx context.Context, vClusterName, chartValue
 
 	// we have to upgrade / install the chart
 	err = helm.NewClient(&cmd.rawConfig, cmd.log, helmExecutablePath).Upgrade(ctx, vClusterName, cmd.Namespace, helm.UpgradeOptions{
-		Chart:       cmd.ChartName,
-		Repo:        cmd.ChartRepo,
-		Version:     cmd.ChartVersion,
-		Path:        cmd.LocalChartDir,
-		Values:      chartValues,
-		ValuesFiles: cmd.Values,
-		SetValues:   cmd.SetValues,
-		Debug:       cmd.Debug,
+		CreateNamespace: cmd.CreateNamespace,
+		Chart:           cmd.ChartName,
+		Repo:            cmd.ChartRepo,
+		Version:         cmd.ChartVersion,
+		Path:            cmd.LocalChartDir,
+		Values:          chartValues,
+		ValuesFiles:     cmd.Values,
+		SetValues:       cmd.SetValues,
+		Debug:           cmd.Debug,
 	})
 	if err != nil {
 		return err
@@ -483,18 +559,18 @@ func (cmd *createHelm) ToChartOptions(kubernetesVersion *version.Info, log log.L
 		cmd.localCluster = true
 	}
 
+	cfg := cmd.LoadedConfig(log)
 	return &config.ExtraValuesOptions{
-		Distro:    cmd.Distro,
-		Expose:    cmd.Expose,
-		SyncNodes: cmd.localCluster,
-		NodePort:  cmd.localCluster,
+		Distro:   cmd.Distro,
+		Expose:   cmd.Expose,
+		NodePort: cmd.localCluster,
 		KubernetesVersion: config.KubernetesVersion{
 			Major: kubernetesVersion.Major,
 			Minor: kubernetesVersion.Minor,
 		},
-		DisableTelemetry:    cliconfig.GetConfig(log).TelemetryDisabled,
+		DisableTelemetry:    cfg.TelemetryDisabled,
 		InstanceCreatorType: "vclusterctl",
-		MachineID:           telemetry.GetMachineID(log),
+		MachineID:           telemetry.GetMachineID(cfg),
 	}, nil
 }
 

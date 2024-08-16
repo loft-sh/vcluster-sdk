@@ -10,11 +10,10 @@ import (
 	"strings"
 	"time"
 
-	loftkubeconfig "github.com/loft-sh/loftctl/v4/pkg/kubeconfig"
 	"github.com/loft-sh/log"
 	"github.com/loft-sh/vcluster/pkg/cli/find"
 	"github.com/loft-sh/vcluster/pkg/cli/podprinter"
-	"github.com/loft-sh/vcluster/pkg/util/kubeconfig"
+	utilkubeconfig "github.com/loft-sh/vcluster/pkg/util/kubeconfig"
 	"github.com/pkg/errors"
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
@@ -41,40 +40,6 @@ var CriticalStatus = map[string]bool{
 
 var SortPodsByNewest = func(pods []corev1.Pod, i, j int) bool {
 	return pods[i].CreationTimestamp.Unix() > pods[j].CreationTimestamp.Unix()
-}
-
-// GetProKubeConfig builds a pro kube config from options and client
-func GetProKubeConfig(options loftkubeconfig.ContextOptions) (*clientcmdapi.Config, error) {
-	contextName := options.Name
-	cluster := clientcmdapi.NewCluster()
-	cluster.Server = options.Server
-	cluster.CertificateAuthorityData = options.CaData
-	cluster.InsecureSkipTLSVerify = options.InsecureSkipTLSVerify
-
-	authInfo := clientcmdapi.NewAuthInfo()
-	if options.Token != "" || options.ClientCertificateData != nil || options.ClientKeyData != nil {
-		authInfo.Token = options.Token
-		authInfo.ClientKeyData = options.ClientKeyData
-		authInfo.ClientCertificateData = options.ClientCertificateData
-	}
-
-	config := clientcmdapi.NewConfig()
-	config.Clusters[contextName] = cluster
-	config.AuthInfos[contextName] = authInfo
-
-	// Update kube context
-	kubeContext := clientcmdapi.NewContext()
-	kubeContext.Cluster = contextName
-	kubeContext.AuthInfo = contextName
-	kubeContext.Namespace = options.CurrentNamespace
-
-	config.Contexts[contextName] = kubeContext
-	config.CurrentContext = contextName
-
-	// set kind & version
-	config.APIVersion = "v1"
-	config.Kind = "Config"
-	return config, nil
 }
 
 // GetKubeConfig attempts to read the kubeconfig from the default Secret and
@@ -119,10 +84,11 @@ func GetKubeConfig(ctx context.Context, kubeClient *kubernetes.Clientset, vclust
 			}
 		}
 
-		kubeConfig, err = kubeconfig.ReadKubeConfig(ctx, kubeClient, vclusterName, namespace)
+		kubeConfig, err = utilkubeconfig.ReadKubeConfig(ctx, kubeClient, vclusterName, namespace)
 		if err != nil {
 			return false, nil
 		}
+		log.Done("vCluster is up and running")
 		return true, nil
 	})
 	if err != nil {

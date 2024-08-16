@@ -10,47 +10,60 @@ import (
 
 	"github.com/ghodss/yaml"
 	clusterv1 "github.com/loft-sh/agentapi/v4/pkg/apis/loft/cluster/v1"
-	agentstoragev1 "github.com/loft-sh/agentapi/v4/pkg/apis/loft/storage/v1"
 	managementv1 "github.com/loft-sh/api/v4/pkg/apis/management/v1"
 	storagev1 "github.com/loft-sh/api/v4/pkg/apis/storage/v1"
-	"github.com/loft-sh/loftctl/v4/cmd/loftctl/cmd/create"
-	"github.com/loft-sh/loftctl/v4/pkg/client/helper"
-	"github.com/loft-sh/loftctl/v4/pkg/client/naming"
-	"github.com/loft-sh/loftctl/v4/pkg/config"
-	"github.com/loft-sh/loftctl/v4/pkg/vcluster"
 	"github.com/loft-sh/log"
 	vclusterconfig "github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
 	"github.com/loft-sh/vcluster/pkg/constants"
+	"github.com/loft-sh/vcluster/pkg/kube"
 	"github.com/loft-sh/vcluster/pkg/platform"
+	"github.com/loft-sh/vcluster/pkg/platform/clihelper"
+	"github.com/loft-sh/vcluster/pkg/platform/kubeconfig"
+	"github.com/loft-sh/vcluster/pkg/projectutil"
 	"github.com/loft-sh/vcluster/pkg/strvals"
 	"github.com/loft-sh/vcluster/pkg/telemetry"
 	"github.com/loft-sh/vcluster/pkg/upgrade"
 	"github.com/loft-sh/vcluster/pkg/util"
-	"github.com/loft-sh/vcluster/pkg/util/cliconfig"
+	"github.com/mgutz/ansi"
 	"golang.org/x/mod/semver"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func CreatePlatform(ctx context.Context, options *CreateOptions, globalFlags *flags.GlobalFlags, virtualClusterName string, log log.Logger) error {
-	platformClient, err := platform.CreatePlatformClient()
+	cfg := globalFlags.LoadedConfig(log)
+	platformClient, err := platform.InitClientFromConfig(ctx, cfg)
 	if err != nil {
 		return err
 	}
 
 	// determine project & cluster name
-	options.Cluster, options.Project, err = helper.SelectProjectOrCluster(ctx, platformClient, options.Cluster, options.Project, false, log)
+	options.Cluster, options.Project, err = platform.SelectProjectOrCluster(ctx, platformClient, options.Cluster, options.Project, false, log)
 	if err != nil {
 		return err
 	}
 
-	virtualClusterNamespace := naming.ProjectNamespace(options.Project)
+	virtualClusterNamespace := projectutil.ProjectNamespace((options.Project))
 	managementClient, err := platformClient.Management()
 	if err != nil {
 		return err
+	}
+
+	// delete the existing cluster if needed
+	if options.Recreate {
+		_, err := managementClient.Loft().ManagementV1().VirtualClusterInstances(virtualClusterNamespace).Get(ctx, virtualClusterName, metav1.GetOptions{})
+		if err != nil && !kerrors.IsNotFound(err) {
+			return fmt.Errorf("couldn't retrieve virtual cluster instance: %w", err)
+		} else if err == nil {
+			// delete the virtual cluster
+			err = managementClient.Loft().ManagementV1().VirtualClusterInstances(virtualClusterNamespace).Delete(ctx, virtualClusterName, metav1.DeleteOptions{})
+			if err != nil && !kerrors.IsNotFound(err) {
+				return fmt.Errorf("couldn't delete virtual cluster instance: %w", err)
+			}
+		}
 	}
 
 	// make sure there is not existing virtual cluster
@@ -62,7 +75,7 @@ func CreatePlatform(ctx context.Context, options *CreateOptions, globalFlags *fl
 		log.Infof("Waiting until virtual cluster is deleted...")
 
 		// wait until the virtual cluster instance is deleted
-		waitErr := wait.PollUntilContextTimeout(ctx, time.Second, config.Timeout(), false, func(ctx context.Context) (done bool, err error) {
+		waitErr := wait.PollUntilContextTimeout(ctx, time.Second, clihelper.Timeout(), false, func(ctx context.Context) (done bool, err error) {
 			virtualClusterInstance, err = managementClient.Loft().ManagementV1().VirtualClusterInstances(virtualClusterNamespace).Get(ctx, virtualClusterName, metav1.GetOptions{})
 			if err != nil && !kerrors.IsNotFound(err) {
 				return false, err
@@ -82,10 +95,10 @@ func CreatePlatform(ctx context.Context, options *CreateOptions, globalFlags *fl
 	}
 
 	// if the virtual cluster already exists and flag is not set, we terminate
-	if !options.Upgrade && virtualClusterInstance != nil {
+	if !options.Upgrade && !options.UseExisting && virtualClusterInstance != nil {
 		return fmt.Errorf("virtual cluster %s already exists in project %s", virtualClusterName, options.Project)
-	} else if virtualClusterInstance != nil && virtualClusterInstance.Spec.NetworkPeer {
-		return fmt.Errorf("cannot upgrade a virtual cluster that was created via helm, please run 'vcluster use manager helm' or use the '--manager helm' flag")
+	} else if virtualClusterInstance != nil && virtualClusterInstance.Spec.External {
+		return fmt.Errorf("cannot upgrade a virtual cluster that was created via helm, please run 'vcluster use driver helm' or use the '--driver helm' flag")
 	}
 
 	// should create via template
@@ -98,7 +111,7 @@ func CreatePlatform(ctx context.Context, options *CreateOptions, globalFlags *fl
 	if useTemplate {
 		if virtualClusterInstance == nil {
 			// create via template
-			virtualClusterInstance, err = createWithTemplate(ctx, platformClient, options, virtualClusterName, log)
+			virtualClusterInstance, err = createWithTemplate(ctx, platformClient, options, virtualClusterName, globalFlags.Namespace, log)
 			if err != nil {
 				return err
 			}
@@ -126,16 +139,33 @@ func CreatePlatform(ctx context.Context, options *CreateOptions, globalFlags *fl
 	}
 
 	// wait until virtual cluster is ready
-	virtualClusterInstance, err = vcluster.WaitForVirtualClusterInstance(ctx, managementClient, virtualClusterInstance.Namespace, virtualClusterInstance.Name, true, log)
+	virtualClusterInstance, err = platform.WaitForVirtualClusterInstance(ctx, managementClient, virtualClusterInstance.Namespace, virtualClusterInstance.Name, !options.SkipWait, log)
 	if err != nil {
 		return err
 	}
 	log.Donef("Successfully created the virtual cluster %s in project %s", virtualClusterName, options.Project)
 
-	// check if we should connect to the vcluster
-	if options.Connect {
+	if options.CreateContext {
+		// create kube context options
+		contextOptions, err := platform.CreateVirtualClusterInstanceOptions(ctx, platformClient, "", options.Project, virtualClusterInstance, options.SwitchContext)
+		if err != nil {
+			return err
+		}
+
+		// update kube config
+		err = kubeconfig.UpdateKubeConfig(contextOptions, cfg)
+		if err != nil {
+			return err
+		}
+
+		log.Donef("Successfully updated kube context to use virtual cluster %s in project %s", ansi.Color(virtualClusterName, "white+b"), ansi.Color(options.Project, "white+b"))
+	}
+
+	// check if we should connect to the vcluster or print the kubeconfig
+	if options.Connect || options.Print {
 		return ConnectPlatform(ctx, &ConnectOptions{
 			UpdateCurrent:         options.UpdateCurrent,
+			Print:                 options.Print,
 			KubeConfigContextName: options.KubeConfigContextName,
 			KubeConfig:            "./kubeconfig.yaml",
 			Project:               options.Project,
@@ -162,7 +192,7 @@ func createWithoutTemplate(ctx context.Context, platformClient platform.Client, 
 	zone, offset := time.Now().Zone()
 	virtualClusterInstance := &managementv1.VirtualClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: naming.ProjectNamespace(options.Project),
+			Namespace: projectutil.ProjectNamespace((options.Project)),
 			Name:      virtualClusterName,
 			Annotations: map[string]string{
 				clusterv1.SleepModeTimezoneAnnotation: zone + "#" + strconv.Itoa(offset),
@@ -170,10 +200,12 @@ func createWithoutTemplate(ctx context.Context, platformClient platform.Client, 
 		},
 		Spec: managementv1.VirtualClusterInstanceSpec{
 			VirtualClusterInstanceSpec: storagev1.VirtualClusterInstanceSpec{
+				Description: options.Description,
+				DisplayName: options.DisplayName,
 				Template: &storagev1.VirtualClusterTemplateDefinition{
-					VirtualClusterCommonSpec: agentstoragev1.VirtualClusterCommonSpec{
-						HelmRelease: agentstoragev1.VirtualClusterHelmRelease{
-							Chart: agentstoragev1.VirtualClusterHelmChart{
+					VirtualClusterCommonSpec: storagev1.VirtualClusterCommonSpec{
+						HelmRelease: storagev1.VirtualClusterHelmRelease{
+							Chart: storagev1.VirtualClusterHelmChart{
 								Name:    options.ChartName,
 								Repo:    options.ChartRepo,
 								Version: options.ChartVersion,
@@ -181,7 +213,7 @@ func createWithoutTemplate(ctx context.Context, platformClient platform.Client, 
 							Values: helmValues,
 						},
 						ForwardToken: true,
-						Pro: agentstoragev1.VirtualClusterProSpec{
+						Pro: storagev1.VirtualClusterProSpec{
 							Enabled: true,
 						},
 					},
@@ -196,17 +228,21 @@ func createWithoutTemplate(ctx context.Context, platformClient platform.Client, 
 		},
 	}
 
+	if options.User != "" || options.Team != "" {
+		updateOwner(options.User, options.Team, virtualClusterInstance)
+	}
+
 	// set links
-	create.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
+	kube.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
 
 	// set labels
-	_, err = create.UpdateLabels(virtualClusterInstance, options.Labels)
+	_, err = kube.UpdateLabels(virtualClusterInstance, options.Labels)
 	if err != nil {
 		return nil, err
 	}
 
 	// set annotations
-	_, err = create.UpdateAnnotations(virtualClusterInstance, options.Annotations)
+	_, err = kube.UpdateAnnotations(virtualClusterInstance, options.Annotations)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +261,18 @@ func createWithoutTemplate(ctx context.Context, platformClient platform.Client, 
 	}
 
 	return virtualClusterInstance, nil
+}
+
+func updateOwner(user, team string, virtualClusterInstance *managementv1.VirtualClusterInstance) {
+	owner := &storagev1.UserOrTeam{}
+	if user != "" {
+		owner.User = user
+	}
+	if team != "" {
+		owner.Team = team
+	}
+
+	virtualClusterInstance.Spec.VirtualClusterInstanceSpec.Owner = owner
 }
 
 func upgradeWithoutTemplate(ctx context.Context, platformClient platform.Client, options *CreateOptions, virtualClusterInstance *managementv1.VirtualClusterInstance, log log.Logger) (*managementv1.VirtualClusterInstance, error) {
@@ -250,30 +298,50 @@ func upgradeWithoutTemplate(ctx context.Context, platformClient platform.Client,
 		return nil, fmt.Errorf("cannot change chart name from '%s' to '%s', this operation is not allowed", virtualClusterInstance.Spec.Template.HelmRelease.Chart.Name, options.ChartName)
 	}
 
-	chartRepoChanged := virtualClusterInstance.Spec.Template.HelmRelease.Chart.Repo != options.ChartRepo
-	chartVersionChanged := virtualClusterInstance.Spec.Template.HelmRelease.Chart.Version != options.ChartVersion
+	chartRepoChanged := (options.ChartRepo != "" && virtualClusterInstance.Spec.Template.HelmRelease.Chart.Repo != options.ChartRepo)
+	chartVersionChanged := (options.ChartVersion != "" && virtualClusterInstance.Spec.Template.HelmRelease.Chart.Version != options.ChartVersion)
 	valuesChanged := virtualClusterInstance.Spec.Template.HelmRelease.Values != helmValues
+	descriptionChanged := (options.Description != "" && virtualClusterInstance.Spec.Description != options.Description)
+	displayNameChanged := (options.DisplayName != "" && virtualClusterInstance.Spec.DisplayName != options.DisplayName)
+	teamChanged := (options.Team != "" && virtualClusterInstance.Spec.Owner.Team != options.Team)
+	userChanged := (options.User != "" && virtualClusterInstance.Spec.Owner.User != options.User)
 
 	// set links
-	linksChanged := create.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
+	linksChanged := kube.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
 
 	// set labels
-	labelsChanged, err := create.UpdateLabels(virtualClusterInstance, options.Labels)
+	labelsChanged, err := kube.UpdateLabels(virtualClusterInstance, options.Labels)
 	if err != nil {
 		return nil, err
 	}
 
 	// set annotations
-	annotationsChanged, err := create.UpdateAnnotations(virtualClusterInstance, options.Annotations)
+	annotationsChanged, err := kube.UpdateAnnotations(virtualClusterInstance, options.Annotations)
 	if err != nil {
 		return nil, err
 	}
 
 	// check if update is needed
-	if chartRepoChanged || chartVersionChanged || valuesChanged || linksChanged || labelsChanged || annotationsChanged {
-		virtualClusterInstance.Spec.Template.HelmRelease.Chart.Repo = options.ChartRepo
-		virtualClusterInstance.Spec.Template.HelmRelease.Chart.Version = options.ChartVersion
+	if chartRepoChanged || chartVersionChanged || valuesChanged || descriptionChanged || displayNameChanged || teamChanged || userChanged || linksChanged || labelsChanged || annotationsChanged {
 		virtualClusterInstance.Spec.Template.HelmRelease.Values = helmValues
+		if chartRepoChanged {
+			virtualClusterInstance.Spec.Template.HelmRelease.Chart.Repo = options.ChartRepo
+		}
+		if chartVersionChanged {
+			virtualClusterInstance.Spec.Template.HelmRelease.Chart.Version = options.ChartVersion
+		}
+		if descriptionChanged {
+			virtualClusterInstance.Spec.Description = options.Description
+		}
+		if displayNameChanged {
+			virtualClusterInstance.Spec.DisplayName = options.DisplayName
+		}
+		if teamChanged {
+			virtualClusterInstance.Spec.Owner.Team = options.Team
+		}
+		if userChanged {
+			virtualClusterInstance.Spec.Owner.User = options.User
+		}
 
 		// get management client
 		managementClient, err := platformClient.Management()
@@ -281,7 +349,7 @@ func upgradeWithoutTemplate(ctx context.Context, platformClient platform.Client,
 			return nil, err
 		}
 
-		patch := client.MergeFrom(oldVirtualCluster)
+		patch := crclient.MergeFrom(oldVirtualCluster)
 		patchData, err := patch.Data(virtualClusterInstance)
 		if err != nil {
 			return nil, fmt.Errorf("calculate update patch: %w", err)
@@ -332,14 +400,14 @@ func shouldCreateWithTemplate(ctx context.Context, platformClient platform.Clien
 	return true, nil
 }
 
-func createWithTemplate(ctx context.Context, platformClient platform.Client, options *CreateOptions, virtualClusterName string, log log.Logger) (*managementv1.VirtualClusterInstance, error) {
+func createWithTemplate(ctx context.Context, platformClient platform.Client, options *CreateOptions, virtualClusterName string, targetNamespace string, log log.Logger) (*managementv1.VirtualClusterInstance, error) {
 	err := validateTemplateOptions(options)
 	if err != nil {
 		return nil, err
 	}
 
 	// resolve template
-	virtualClusterTemplate, resolvedParameters, err := create.ResolveTemplate(
+	virtualClusterTemplate, resolvedParameters, err := platform.ResolveVirtualClusterTemplate(
 		ctx,
 		platformClient,
 		options.Project,
@@ -357,7 +425,7 @@ func createWithTemplate(ctx context.Context, platformClient platform.Client, opt
 	zone, offset := time.Now().Zone()
 	virtualClusterInstance := &managementv1.VirtualClusterInstance{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: naming.ProjectNamespace(options.Project),
+			Namespace: projectutil.ProjectNamespace((options.Project)),
 			Name:      virtualClusterName,
 			Annotations: map[string]string{
 				clusterv1.SleepModeTimezoneAnnotation: zone + "#" + strconv.Itoa(offset),
@@ -365,13 +433,16 @@ func createWithTemplate(ctx context.Context, platformClient platform.Client, opt
 		},
 		Spec: managementv1.VirtualClusterInstanceSpec{
 			VirtualClusterInstanceSpec: storagev1.VirtualClusterInstanceSpec{
+				Description: options.Description,
+				DisplayName: options.DisplayName,
 				TemplateRef: &storagev1.TemplateRef{
 					Name:    virtualClusterTemplate.Name,
 					Version: options.TemplateVersion,
 				},
 				ClusterRef: storagev1.VirtualClusterClusterRef{
 					ClusterRef: storagev1.ClusterRef{
-						Cluster: options.Cluster,
+						Cluster:   options.Cluster,
+						Namespace: targetNamespace,
 					},
 				},
 				Parameters: resolvedParameters,
@@ -379,17 +450,21 @@ func createWithTemplate(ctx context.Context, platformClient platform.Client, opt
 		},
 	}
 
+	if options.User != "" || options.Team != "" {
+		updateOwner(options.User, options.Team, virtualClusterInstance)
+	}
+
 	// set links
-	create.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
+	kube.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
 
 	// set labels
-	_, err = create.UpdateLabels(virtualClusterInstance, options.Labels)
+	_, err = kube.UpdateLabels(virtualClusterInstance, options.Labels)
 	if err != nil {
 		return nil, err
 	}
 
 	// set annotations
-	_, err = create.UpdateAnnotations(virtualClusterInstance, options.Annotations)
+	_, err = kube.UpdateAnnotations(virtualClusterInstance, options.Annotations)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +492,7 @@ func upgradeWithTemplate(ctx context.Context, platformClient platform.Client, op
 	}
 
 	// resolve template
-	virtualClusterTemplate, resolvedParameters, err := create.ResolveTemplate(
+	virtualClusterTemplate, resolvedParameters, err := platform.ResolveVirtualClusterTemplate(
 		ctx,
 		platformClient,
 		options.Project,
@@ -440,22 +515,27 @@ func upgradeWithTemplate(ctx context.Context, platformClient platform.Client, op
 	templateRefChanged := virtualClusterInstance.Spec.TemplateRef.Name != virtualClusterTemplate.Name
 	paramsChanged := virtualClusterInstance.Spec.Parameters != resolvedParameters
 	versionChanged := (options.TemplateVersion != "" && virtualClusterInstance.Spec.TemplateRef.Version != options.TemplateVersion)
-	linksChanged := create.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
+	descriptionChanged := (options.Description != "" && virtualClusterInstance.Spec.Description != options.Description)
+	displayNameChanged := (options.DisplayName != "" && virtualClusterInstance.Spec.DisplayName != options.DisplayName)
+	teamChanged := (options.Team != "" && virtualClusterInstance.Spec.Owner.Team != options.Team)
+	userChanged := (options.User != "" && virtualClusterInstance.Spec.Owner.User != options.User)
+
+	linksChanged := kube.SetCustomLinksAnnotation(virtualClusterInstance, options.Links)
 
 	// set labels
-	labelsChanged, err := create.UpdateLabels(virtualClusterInstance, options.Labels)
+	labelsChanged, err := kube.UpdateLabels(virtualClusterInstance, options.Labels)
 	if err != nil {
 		return nil, err
 	}
 
 	// set annotations
-	annotationsChanged, err := create.UpdateAnnotations(virtualClusterInstance, options.Annotations)
+	annotationsChanged, err := kube.UpdateAnnotations(virtualClusterInstance, options.Annotations)
 	if err != nil {
 		return nil, err
 	}
 
 	// check if update is needed
-	if templateRefChanged || paramsChanged || versionChanged || linksChanged || labelsChanged || annotationsChanged {
+	if templateRefChanged || paramsChanged || versionChanged || descriptionChanged || displayNameChanged || teamChanged || userChanged || linksChanged || labelsChanged || annotationsChanged {
 		virtualClusterInstance.Spec.TemplateRef.Name = virtualClusterTemplate.Name
 		virtualClusterInstance.Spec.TemplateRef.Version = options.TemplateVersion
 		virtualClusterInstance.Spec.Parameters = resolvedParameters
@@ -466,7 +546,7 @@ func upgradeWithTemplate(ctx context.Context, platformClient platform.Client, op
 			return nil, err
 		}
 
-		patch := client.MergeFrom(oldVirtualCluster)
+		patch := crclient.MergeFrom(oldVirtualCluster)
 		patchData, err := patch.Data(virtualClusterInstance)
 		if err != nil {
 			return nil, fmt.Errorf("calculate update patch: %w", err)
@@ -510,7 +590,7 @@ func validateTemplateOptions(options *CreateOptions) error {
 	if options.KubernetesVersion != "" {
 		return fmt.Errorf("cannot use --kubernetes-version because the vcluster is using a template")
 	}
-	if options.Distro != "" && options.Distro != "k3s" {
+	if options.Distro != "" && options.Distro != "k8s" {
 		return fmt.Errorf("cannot use --distro because the vcluster is using a template")
 	}
 	if options.ChartName != "vcluster" {
@@ -623,14 +703,15 @@ func toChartOptions(platformClient platform.Client, options *CreateOptions, log 
 		options.ChartVersion = ""
 	}
 
+	cfg := platformClient.Config()
 	return &vclusterconfig.ExtraValuesOptions{
 		Distro:              options.Distro,
 		Expose:              options.Expose,
 		KubernetesVersion:   kubernetesVersion,
-		DisableTelemetry:    cliconfig.GetConfig(log).TelemetryDisabled,
+		DisableTelemetry:    cfg.TelemetryDisabled,
 		InstanceCreatorType: "vclusterctl",
-		PlatformInstanceID:  telemetry.GetPlatformInstanceID(platformClient.Self()),
-		PlatformUserID:      telemetry.GetPlatformUserID(platformClient.Self()),
-		MachineID:           telemetry.GetMachineID(log),
+		PlatformInstanceID:  telemetry.GetPlatformInstanceID(cfg, platformClient.Self()),
+		PlatformUserID:      telemetry.GetPlatformUserID(cfg, platformClient.Self()),
+		MachineID:           telemetry.GetMachineID(cfg),
 	}, nil
 }

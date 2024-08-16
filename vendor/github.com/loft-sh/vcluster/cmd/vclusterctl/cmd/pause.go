@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"cmp"
 	"context"
+	"fmt"
 
 	"github.com/loft-sh/api/v4/pkg/product"
-	loftctlUtil "github.com/loft-sh/loftctl/v4/pkg/util"
 	"github.com/loft-sh/log"
 	"github.com/loft-sh/vcluster/pkg/cli"
+	"github.com/loft-sh/vcluster/pkg/cli/completion"
+	"github.com/loft-sh/vcluster/pkg/cli/config"
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
-	"github.com/loft-sh/vcluster/pkg/platform"
+	"github.com/loft-sh/vcluster/pkg/cli/util"
 	"github.com/spf13/cobra"
 )
 
@@ -28,11 +31,10 @@ func NewPauseCmd(globalFlags *flags.GlobalFlags) *cobra.Command {
 	}
 
 	cobraCmd := &cobra.Command{
-		Use:     "pause" + loftctlUtil.VClusterNameOnlyUseLine,
+		Use:     "pause" + util.VClusterNameOnlyUseLine,
 		Aliases: []string{"sleep"},
 		Short:   "Pauses a virtual cluster",
-		Long: `
-#######################################################
+		Long: `#######################################################
 ################### vcluster pause ####################
 #######################################################
 Pause will stop a virtual cluster and free all its used
@@ -47,14 +49,14 @@ Example:
 vcluster pause test --namespace test
 #######################################################
 	`,
-		Args:              loftctlUtil.VClusterNameOnlyValidator,
-		ValidArgsFunction: newValidVClusterNameFunc(globalFlags),
+		Args:              util.VClusterNameOnlyValidator,
+		ValidArgsFunction: completion.NewValidVClusterNameFunc(globalFlags),
 		RunE: func(cobraCmd *cobra.Command, args []string) error {
 			return cmd.Run(cobraCmd.Context(), args)
 		},
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Manager, "manager", "", "The manager to use for managing the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver for the virtual cluster, can be either helm or platform.")
 
 	// Platform flags
 	cobraCmd.Flags().StringVar(&cmd.Project, "project", "", "[PLATFORM] The vCluster platform project to use")
@@ -65,14 +67,17 @@ vcluster pause test --namespace test
 
 // Run executes the functionality
 func (cmd *PauseCmd) Run(ctx context.Context, args []string) error {
-	manager, err := platform.GetManager(cmd.Manager)
+	cfg := cmd.LoadedConfig(cmd.Log)
+
+	// If driver has been passed as flag use it, otherwise read it from the config file
+	driverType, err := config.ParseDriverType(cmp.Or(cmd.Driver, string(cfg.Driver.Type)))
 	if err != nil {
-		return err
+		return fmt.Errorf("parse driver type: %w", err)
 	}
 
 	// check if we should create a platform vCluster
-	if manager == platform.ManagerPlatform {
-		return cli.PausePlatform(ctx, &cmd.PauseOptions, args[0], cmd.Log)
+	if driverType == config.PlatformDriver {
+		return cli.PausePlatform(ctx, &cmd.PauseOptions, cfg, args[0], cmd.Log)
 	}
 
 	return cli.PauseHelm(ctx, cmd.GlobalFlags, args[0], cmd.Log)

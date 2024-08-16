@@ -39,14 +39,14 @@ type Config struct {
 	// Sync describes how to sync resources from the virtual cluster to host cluster and back.
 	Sync Sync `json:"sync,omitempty"`
 
+	// Integrations holds config for vCluster integrations with other operators or tools running on the host cluster
+	Integrations Integrations `json:"integrations,omitempty"`
+
 	// Networking options related to the virtual cluster.
 	Networking Networking `json:"networking,omitempty"`
 
 	// Policies to enforce for the virtual cluster deployment as well as within the virtual cluster.
 	Policies Policies `json:"policies,omitempty"`
-
-	// Observability holds options to proxy metrics from the host cluster into the virtual cluster.
-	Observability Observability `json:"observability,omitempty"`
 
 	// Configure vCluster's control plane components and deployment.
 	ControlPlane ControlPlane `json:"controlPlane,omitempty"`
@@ -57,11 +57,11 @@ type Config struct {
 	// Define which vCluster plugins to load.
 	Plugins map[string]Plugins `json:"plugins,omitempty"`
 
-	// Platform holds options for connecting to vCluster Platform.
-	Platform Platform `json:"platform,omitempty"`
-
 	// Experimental features for vCluster. Configuration here might change, so be careful with this.
 	Experimental Experimental `json:"experimental,omitempty"`
+
+	// External holds configuration for tools that are external to the vCluster.
+	External map[string]ExternalConfig `json:"external,omitempty"`
 
 	// Configuration related to telemetry gathered about vCluster usage.
 	Telemetry Telemetry `json:"telemetry,omitempty"`
@@ -76,8 +76,89 @@ type Config struct {
 	Plugin map[string]Plugin `json:"plugin,omitempty"`
 }
 
+// Integrations holds config for vCluster integrations with other operators or tools running on the host cluster
+type Integrations struct {
+	// MetricsServer reuses the metrics server from the host cluster within the vCluster.
+	MetricsServer MetricsServer `json:"metricsServer,omitempty"`
+}
+
+// MetricsServer reuses the metrics server from the host cluster within the vCluster.
+type MetricsServer struct {
+	// Enabled signals the metrics server integration should be enabled.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// APIService holds information about where to find the metrics-server service. Defaults to metrics-server/kube-system.
+	APIService APIService `json:"apiService,omitempty"`
+
+	// Nodes defines if metrics-server nodes api should get proxied from host to virtual cluster.
+	Nodes bool `json:"nodes,omitempty"`
+
+	// Pods defines if metrics-server pods api should get proxied from host to virtual cluster.
+	Pods bool `json:"pods,omitempty"`
+}
+
+// APIService holds configuration related to the api server
+type APIService struct {
+	// Service is a reference to the service for the API server.
+	Service APIServiceService `json:"service,omitempty"`
+}
+
+// APIServiceService holds the service name and namespace of the host apiservice.
+type APIServiceService struct {
+	// Name is the name of the host service of the apiservice.
+	Name string `json:"name,omitempty"`
+
+	// Namespace is the name of the host service of the apiservice.
+	Namespace string `json:"namespace,omitempty"`
+
+	// Port is the target port on the host service to connect to.
+	Port int `json:"port,omitempty"`
+}
+
+// ExternalConfig holds external tool configuration
+type ExternalConfig map[string]interface{}
+
 func (c *Config) UnmarshalYAMLStrict(data []byte) error {
 	return UnmarshalYAMLStrict(data, c)
+}
+
+func (c *Config) GetPlatformConfig() (*PlatformConfig, error) {
+	if c.External == nil {
+		return &PlatformConfig{}, nil
+	}
+	if c.External["platform"] == nil {
+		return &PlatformConfig{}, nil
+	}
+
+	yamlBytes, err := yaml.Marshal(c.External["platform"])
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+
+	retConfig := &PlatformConfig{}
+	if err := yaml.Unmarshal(yamlBytes, retConfig); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+
+	return retConfig, nil
+}
+
+func (c *Config) SetPlatformConfig(platformConfig *PlatformConfig) error {
+	yamlBytes, err := yaml.Marshal(platformConfig)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+
+	setConfig := ExternalConfig{}
+	if err := yaml.Unmarshal(yamlBytes, &setConfig); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+
+	if c.External == nil {
+		c.External = map[string]ExternalConfig{}
+	}
+	c.External["platform"] = setConfig
+	return nil
 }
 
 // BackingStoreType returns the backing store type of the vCluster.
@@ -97,6 +178,10 @@ func (c *Config) BackingStoreType() StoreType {
 	}
 }
 
+func (c *Config) EmbeddedDatabase() bool {
+	return !c.ControlPlane.BackingStore.Database.External.Enabled && !c.ControlPlane.BackingStore.Etcd.Embedded.Enabled && !c.ControlPlane.BackingStore.Etcd.Deploy.Enabled
+}
+
 func (c *Config) Distro() string {
 	if c.ControlPlane.Distro.K3S.Enabled {
 		return K3SDistro
@@ -104,11 +189,17 @@ func (c *Config) Distro() string {
 		return K0SDistro
 	} else if c.ControlPlane.Distro.K8S.Enabled {
 		return K8SDistro
-	} else if c.ControlPlane.Distro.EKS.Enabled {
-		return EKSDistro
 	}
 
 	return K8SDistro
+}
+
+func (c *Config) IsConfiguredForSleepMode() bool {
+	if c != nil && c.External != nil && c.External["platform"] == nil {
+		return false
+	}
+
+	return c.External["platform"]["autoSleep"] != nil || c.External["platform"]["autoDelete"] != nil
 }
 
 // ValidateChanges checks for disallowed config changes.
@@ -122,7 +213,7 @@ func ValidateChanges(oldCfg, newCfg *Config) error {
 
 // ValidateStoreAndDistroChanges checks whether migrating from one store to the other is allowed.
 func ValidateStoreAndDistroChanges(currentStoreType, previousStoreType StoreType, currentDistro, previousDistro string) error {
-	if currentDistro != previousDistro {
+	if currentDistro != previousDistro && !(previousDistro == "eks" && currentDistro == K8SDistro) {
 		return fmt.Errorf("seems like you were using %s as a distro before and now have switched to %s, please make sure to not switch between vCluster distros", previousDistro, currentDistro)
 	}
 
@@ -147,7 +238,7 @@ func (c *Config) IsProFeatureEnabled() bool {
 		return true
 	}
 
-	if c.Distro() == K8SDistro || c.Distro() == EKSDistro {
+	if c.Distro() == K8SDistro {
 		if c.ControlPlane.BackingStore.Database.External.Enabled {
 			return true
 		}
@@ -178,6 +269,10 @@ func (c *Config) IsProFeatureEnabled() bool {
 	}
 
 	if len(c.Experimental.DenyProxyRequests) > 0 {
+		return true
+	}
+
+	if len(c.External["platform"]) > 0 {
 		return true
 	}
 
@@ -369,11 +464,6 @@ type SyncNodeSelector struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
-type Observability struct {
-	// Metrics allows to proxy metrics server apis from host to virtual cluster.
-	Metrics ObservabilityMetrics `json:"metrics,omitempty"`
-}
-
 type ServiceMonitor struct {
 	// Enabled configures if Helm should create the service monitor.
 	Enabled bool `json:"enabled,omitempty"`
@@ -383,19 +473,6 @@ type ServiceMonitor struct {
 
 	// Annotations are the extra annotations to add to the service monitor.
 	Annotations map[string]string `json:"annotations,omitempty"`
-}
-
-type ObservabilityMetrics struct {
-	// Proxy holds the configuration what metrics-server apis should get proxied.
-	Proxy MetricsProxy `json:"proxy,omitempty"`
-}
-
-type MetricsProxy struct {
-	// Nodes defines if metrics-server nodes api should get proxied from host to virtual cluster.
-	Nodes bool `json:"nodes,omitempty"`
-
-	// Pods defines if metrics-server pods api should get proxied from host to virtual cluster.
-	Pods bool `json:"pods,omitempty"`
 }
 
 type Networking struct {
@@ -620,6 +697,9 @@ type ControlPlaneStatefulSet struct {
 	// Persistence defines options around persistence for the statefulSet.
 	Persistence ControlPlanePersistence `json:"persistence,omitempty"`
 
+	// EnableServiceLinks for the StatefulSet pod
+	EnableServiceLinks *bool `json:"enableServiceLinks,omitempty"`
+
 	LabelsAndAnnotations `json:",inline"`
 
 	// Additional labels or annotations for the statefulSet pods.
@@ -653,9 +733,6 @@ type Distro struct {
 
 	// K0S holds k0s relevant configuration.
 	K0S DistroK0s `json:"k0s,omitempty"`
-
-	// EKS holds eks relevant configuration.
-	EKS DistroK8s `json:"eks,omitempty"`
 }
 
 type DistroK3s struct {
@@ -672,6 +749,18 @@ type DistroK3s struct {
 type DistroK8s struct {
 	// Enabled specifies if the K8s distro should be enabled. Only one distro can be enabled at the same time.
 	Enabled bool `json:"enabled,omitempty"`
+
+	// Version specifies k8s components (scheduler, kube-controller-manager & apiserver) version.
+	// It is a shortcut for controlPlane.distro.k8s.apiServer.image.tag,
+	// controlPlane.distro.k8s.controllerManager.image.tag and
+	// controlPlane.distro.k8s.scheduler.image.tag
+	// If e.g. controlPlane.distro.k8s.version is set to v1.30.1 and
+	// controlPlane.distro.k8s.scheduler.image.tag
+	//(or controlPlane.distro.k8s.controllerManager.image.tag or controlPlane.distro.k8s.apiServer.image.tag)
+	// is set to v1.31.0,
+	// value from controlPlane.distro.k8s.<controlPlane-component>.image.tag will be used
+	// (where <controlPlane-component is apiServer, controllerManager and scheduler).
+	Version string `json:"version,omitempty"`
 
 	// APIServer holds configuration specific to starting the api server.
 	APIServer DistroContainerEnabled `json:"apiServer,omitempty"`
@@ -880,6 +969,9 @@ type EtcdDeployStatefulSet struct {
 	// Enabled defines if the statefulSet should be deployed
 	Enabled bool `json:"enabled,omitempty"`
 
+	// EnableServiceLinks for the StatefulSet pod
+	EnableServiceLinks *bool `json:"enableServiceLinks,omitempty"`
+
 	// Image is the image to use for the external etcd statefulSet
 	Image Image `json:"image,omitempty"`
 
@@ -952,6 +1044,9 @@ type CoreDNS struct {
 
 	// OverwriteManifests can be used to overwrite the coredns manifests used to deploy coredns
 	OverwriteManifests string `json:"overwriteManifests,omitempty"`
+
+	// PriorityClassName specifies the priority class name for the CoreDNS pods.
+	PriorityClassName string `json:"priorityClassName,omitempty"`
 }
 
 func (c CoreDNS) JSONSchemaExtend(base *jsonschema.Schema) {
@@ -982,6 +1077,9 @@ type CoreDNSDeployment struct {
 	Pods LabelsAndAnnotations `json:"pods,omitempty"`
 
 	LabelsAndAnnotations `json:",inline"`
+
+	// TopologySpreadConstraints are the topology spread constraints for the CoreDNS pod.
+	TopologySpreadConstraints []interface{} `json:"topologySpreadConstraints,omitempty"`
 }
 
 type ControlPlaneProxy struct {
@@ -1107,6 +1205,14 @@ type ControlPlanePersistence struct {
 
 	// VolumeClaimTemplates defines the volumeClaimTemplates for the statefulSet
 	VolumeClaimTemplates []map[string]interface{} `json:"volumeClaimTemplates,omitempty"`
+
+	// Allows you to override the dataVolume. Only works correctly if volumeClaim.enabled=false.
+	DataVolume []map[string]interface{} `json:"dataVolume,omitempty"`
+
+	// BinariesVolume defines a binaries volume that is used to retrieve
+	// distro specific executables to be run by the syncer controller.
+	// This volume doesn't need to be persistent.
+	BinariesVolume []map[string]interface{} `json:"binariesVolume,omitempty"`
 
 	// AddVolumes defines extra volumes for the pod
 	AddVolumes []map[string]interface{} `json:"addVolumes,omitempty"`
@@ -1271,8 +1377,9 @@ func (p Policies) JSONSchemaExtend(base *jsonschema.Schema) {
 }
 
 type ResourceQuota struct {
-	// Enabled defines if the resource quota should be enabled.
-	Enabled bool `json:"enabled,omitempty"`
+	// Enabled defines if the resource quota should be enabled. "auto" means that if limitRange is enabled,
+	// the resourceQuota will be enabled as well.
+	Enabled StrBool `json:"enabled,omitempty" jsonschema:"oneof_type=string;boolean"`
 
 	// Quota are the quota options
 	Quota map[string]interface{} `json:"quota,omitempty"`
@@ -1302,8 +1409,9 @@ type LabelSelectorRequirement struct {
 }
 
 type LimitRange struct {
-	// Enabled defines if the limit range should be deployed by vCluster.
-	Enabled bool `json:"enabled,omitempty"`
+	// Enabled defines if the limit range should be deployed by vCluster. "auto" means that if resourceQuota is enabled,
+	// the limitRange will be enabled as well.
+	Enabled StrBool `json:"enabled,omitempty" jsonschema:"oneof_type=string;boolean"`
 
 	// Default are the default limits for the limit range
 	Default map[string]interface{} `json:"default,omitempty"`
@@ -1329,6 +1437,9 @@ type OutgoingConnections struct {
 	// to the pods matched by a NetworkPolicySpec's podSelector. The except entry describes CIDRs
 	// that should not be included within this rule.
 	IPBlock IPBlock `json:"ipBlock,omitempty"`
+
+	// Platform enables egress access towards loft platform
+	Platform bool `json:"platform,omitempty"`
 }
 
 type IPBlock struct {
@@ -1618,6 +1729,22 @@ func (e ExperimentalSyncSettings) JSONSchemaExtend(base *jsonschema.Schema) {
 }
 
 type ExperimentalDeploy struct {
+	// Host defines what manifests to deploy into the host cluster
+	Host ExperimentalDeployHost `json:"host,omitempty"`
+
+	// VCluster defines what manifests and charts to deploy into the vCluster
+	VCluster ExperimentalDeployVCluster `json:"vcluster,omitempty"`
+}
+
+type ExperimentalDeployHost struct {
+	// Manifests are raw Kubernetes manifests that should get applied within the virtual cluster.
+	Manifests string `json:"manifests,omitempty"`
+
+	// ManifestsTemplate is a Kubernetes manifest template that will be rendered with vCluster values before applying it within the virtual cluster.
+	ManifestsTemplate string `json:"manifestsTemplate,omitempty"`
+}
+
+type ExperimentalDeployVCluster struct {
 	// Manifests are raw Kubernetes manifests that should get applied within the virtual cluster.
 	Manifests string `json:"manifests,omitempty"`
 
@@ -1662,54 +1789,27 @@ type ExperimentalDeployHelmChart struct {
 	Password string `json:"password,omitempty"`
 }
 
-type Platform struct {
-	// API defines how vCluster can contact the platform api.
-	API PlatformAPI `json:"api,omitempty"`
-
-	// Name is the name of the vCluster instance in the vCluster platform
-	Name string `json:"name,omitempty"`
-
-	// Owner is the desired owner of the vCluster instance within the vCluster platform. If empty will take the current user.
-	Owner PlatformOwner `json:"owner,omitempty"`
-
-	// Project is the project within the platform where the vCluster instance should connect.
-	Project string `json:"project,omitempty"`
-}
-
-type PlatformOwner struct {
-	// User is the user id within the platform. This is mutually exclusive with team.
-	User string `json:"user,omitempty"`
-
-	// Team is the team id within the platform. This is mutually exclusive with user.
-	Team string `json:"team,omitempty"`
-}
-
-type PlatformAPI struct {
-	// AccessKey specifies the access key as a regular text value.
-	AccessKey string `json:"accessKey,omitempty"`
-
-	// Host specifies the platform host to use.
-	Host string `json:"host,omitempty"`
-
-	// Insecure specifies if the host uses a self-signed certificate.
-	Insecure bool `json:"insecure,omitempty"`
-
-	// SecretRef defines where to find the platform access key and host. By default, vCluster will search in the following locations in this precedence:
-	// * platform.api.accessKey
+type PlatformConfig struct {
+	// APIKey defines where to find the platform access key and host. By default, vCluster will search in the following locations in this precedence:
 	// * environment variable called LICENSE
-	// * secret specified under platform.api.secretRef.name
+	// * secret specified under external.platform.apiKey.secretName
 	// * secret called "vcluster-platform-api-key" in the vCluster namespace
-	SecretRef PlatformAccessKeySecretReference `json:"secretRef,omitempty"`
+	APIKey PlatformAPIKey `json:"apiKey,omitempty"`
 }
 
-// PlatformAccessKeySecretReference defines where to find the platform access key. The secret key name doesn't matter as long as the secret only contains a single key.
-type PlatformAccessKeySecretReference struct {
-	// Name is the name of the secret where the platform access key is stored. This defaults to vcluster-platform-api-key if undefined.
-	Name string `json:"name,omitempty"`
+// PlatformAPIKey defines where to find the platform access key. The secret key name doesn't matter as long as the secret only contains a single key.
+type PlatformAPIKey struct {
+	// SecretName is the name of the secret where the platform access key is stored. This defaults to vcluster-platform-api-key if undefined.
+	SecretName string `json:"secretName,omitempty"`
 
 	// Namespace defines the namespace where the access key secret should be retrieved from. If this is not equal to the namespace
 	// where the vCluster instance is deployed, you need to make sure vCluster has access to this other namespace.
 	Namespace string `json:"namespace,omitempty"`
+
+	// CreateRBAC will automatically create the necessary RBAC roles and role bindings to allow vCluster to read the secret specified
+	// in the above namespace, if specified.
+	// This defaults to true.
+	CreateRBAC *bool `json:"createRBAC,omitempty"`
 }
 
 type ExperimentalGenericSync struct {

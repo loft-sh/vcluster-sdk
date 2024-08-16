@@ -97,10 +97,33 @@ type DevPodWorkspaceTemplateDefinition struct {
 	// +optional
 	WorkspaceEnv map[string]DevPodProviderOption `json:"workspaceEnv,omitempty"`
 
+	// InstanceTemplate holds the workspace instance template
+	// +optional
+	InstanceTemplate DevPodWorkspaceInstanceTemplateDefinition `json:"instanceTemplate,omitempty"`
+
 	// UseProjectGitCredentials specifies if the project git credentials should be used instead of local ones for this workspace
 	// +optional
 	UseProjectGitCredentials bool `json:"useProjectGitCredentials,omitempty"`
+
+	// UseProjectSSHCredentials specifies if the project ssh credentials should be used instead of local ones for this workspace
+	// +optional
+	UseProjectSSHCredentials bool `json:"useProjectSSHCredentials,omitempty"`
+
+	// GitCloneStrategy specifies how git based workspace are being cloned. Can be "" (full, default), treeless, blobless or shallow
+	// +optional
+	GitCloneStrategy GitCloneStrategy `json:"gitCloneStrategy,omitempty"`
 }
+
+// +enum
+type GitCloneStrategy string
+
+// WARN: Need to match https://github.com/loft-sh/devpod/pkg/git/clone.go
+const (
+	FullCloneStrategy     GitCloneStrategy = ""
+	BloblessCloneStrategy GitCloneStrategy = "blobless"
+	TreelessCloneStrategy GitCloneStrategy = "treeless"
+	ShallowCloneStrategy  GitCloneStrategy = "shallow"
+)
 
 type DevPodWorkspaceProvider struct {
 	// Name is the name of the provider. This can also be an url.
@@ -113,6 +136,13 @@ type DevPodWorkspaceProvider struct {
 	// Env are environment options to set when using the provider.
 	// +optional
 	Env map[string]DevPodProviderOption `json:"env,omitempty"`
+}
+
+type DevPodWorkspaceInstanceTemplateDefinition struct {
+	// The virtual cluster instance metadata
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +optional
+	TemplateMetadata `json:"metadata,omitempty"`
 }
 
 type DevPodProviderOption struct {

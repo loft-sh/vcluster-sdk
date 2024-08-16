@@ -8,8 +8,7 @@ import (
 
 	"github.com/denisbrodbeck/machineid"
 	managementv1 "github.com/loft-sh/api/v4/pkg/apis/management/v1"
-	"github.com/loft-sh/log"
-	"github.com/loft-sh/vcluster/pkg/util/cliconfig"
+	"github.com/loft-sh/vcluster/pkg/cli/config"
 	homedir "github.com/mitchellh/go-homedir"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/version"
@@ -33,6 +32,20 @@ func getVClusterID(ctx context.Context, hostClient kubernetes.Interface, vCluste
 	}
 
 	return string(o.GetUID()), nil
+}
+
+// getVClusterCreationTimestamp returns the creation timestamp of the vCluster service
+func getVClusterCreationTimestamp(ctx context.Context, hostClient kubernetes.Interface, vClusterNamespace, vClusterService string) (int64, error) {
+	if hostClient == nil || vClusterService == "" {
+		return 0, fmt.Errorf("kubernetes client or service is undefined")
+	}
+
+	o, err := getUniqueSyncerObject(ctx, hostClient, vClusterNamespace, vClusterService)
+	if err != nil {
+		return 0, err
+	}
+
+	return o.GetCreationTimestamp().Unix(), nil
 }
 
 // returns a Kubernetes resource that can be used to uniquely identify this syncer instance - PVC or Service
@@ -75,8 +88,8 @@ func toKubernetesVersion(vi *version.Info) *KubernetesVersion {
 }
 
 // GetPlatformUserID returns the loft instance id
-func GetPlatformUserID(self *managementv1.Self) string {
-	if cliconfig.GetConfig(log.Discard).TelemetryDisabled || self == nil {
+func GetPlatformUserID(cliConfig *config.CLI, self *managementv1.Self) string {
+	if cliConfig.TelemetryDisabled || self == nil {
 		return ""
 	}
 	platformID := self.Status.Subject
@@ -87,8 +100,8 @@ func GetPlatformUserID(self *managementv1.Self) string {
 }
 
 // GetPlatformInstanceID returns the loft instance id
-func GetPlatformInstanceID(self *managementv1.Self) string {
-	if cliconfig.GetConfig(log.Discard).TelemetryDisabled || self == nil {
+func GetPlatformInstanceID(cliConfig *config.CLI, self *managementv1.Self) string {
+	if cliConfig.TelemetryDisabled || self == nil {
 		return ""
 	}
 
@@ -97,8 +110,8 @@ func GetPlatformInstanceID(self *managementv1.Self) string {
 
 // GetMachineID retrieves machine ID and encodes it together with users $HOME path and
 // extra key to protect privacy. Returns a hex-encoded string.
-func GetMachineID(log log.Logger) string {
-	if cliconfig.GetConfig(log).TelemetryDisabled {
+func GetMachineID(cliConfig *config.CLI) string {
+	if cliConfig.TelemetryDisabled {
 		return ""
 	}
 

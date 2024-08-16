@@ -8,16 +8,17 @@ import (
 
 	clusterv1 "github.com/loft-sh/agentapi/v4/pkg/apis/loft/cluster/v1"
 	storagev1 "github.com/loft-sh/api/v4/pkg/apis/storage/v1"
-	"github.com/loft-sh/loftctl/v4/pkg/config"
 	"github.com/loft-sh/log"
+	cliconfig "github.com/loft-sh/vcluster/pkg/cli/config"
 	"github.com/loft-sh/vcluster/pkg/cli/find"
 	"github.com/loft-sh/vcluster/pkg/platform"
+	"github.com/loft-sh/vcluster/pkg/platform/clihelper"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func PausePlatform(ctx context.Context, options *PauseOptions, vClusterName string, log log.Logger) error {
-	platformClient, err := platform.CreatePlatformClient()
+func PausePlatform(ctx context.Context, options *PauseOptions, cfg *cliconfig.CLI, vClusterName string, log log.Logger) error {
+	platformClient, err := platform.InitClientFromConfig(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -25,8 +26,11 @@ func PausePlatform(ctx context.Context, options *PauseOptions, vClusterName stri
 	vCluster, err := find.GetPlatformVCluster(ctx, platformClient, vClusterName, options.Project, log)
 	if err != nil {
 		return err
-	} else if vCluster.VirtualCluster != nil && vCluster.VirtualCluster.Spec.NetworkPeer {
-		return fmt.Errorf("cannot pause a virtual cluster that was created via helm, please run 'vcluster use manager helm' or use the '--manager helm' flag")
+	}
+
+	if vCluster.IsInstanceSleeping() {
+		log.Infof("vcluster %s/%s is already paused", vCluster.VirtualCluster.Namespace, vClusterName)
+		return nil
 	}
 
 	managementClient, err := platformClient.Management()
@@ -55,7 +59,7 @@ func PausePlatform(ctx context.Context, options *PauseOptions, vClusterName stri
 
 	// wait for sleeping
 	log.Info("Wait until virtual cluster is sleeping...")
-	err = wait.PollUntilContextTimeout(ctx, time.Second, config.Timeout(), false, func(ctx context.Context) (done bool, err error) {
+	err = wait.PollUntilContextTimeout(ctx, time.Second, clihelper.Timeout(), false, func(ctx context.Context) (done bool, err error) {
 		virtualClusterInstance, err := managementClient.Loft().ManagementV1().VirtualClusterInstances(vCluster.VirtualCluster.Namespace).Get(ctx, vCluster.VirtualCluster.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err

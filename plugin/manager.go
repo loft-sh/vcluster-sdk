@@ -314,19 +314,6 @@ func (m *manager) start() error {
 	m.context.PhysicalManager.GetCache().WaitForCacheSync(m.context.Context)
 	m.context.VirtualManager.GetCache().WaitForCacheSync(m.context.Context)
 
-	// set global owner
-	err = setup.SetGlobalOwner(
-		m.context.Context,
-		m.context.CurrentNamespaceClient,
-		m.context.CurrentNamespace,
-		m.context.Config.WorkloadTargetNamespace,
-		m.context.Config.Experimental.SyncSettings.SetOwner,
-		m.context.Config.WorkloadService,
-	)
-	if err != nil {
-		return fmt.Errorf("error in setting owner reference %v", err)
-	}
-
 	// start syncers
 	for _, v := range m.syncers {
 		// fake syncer?

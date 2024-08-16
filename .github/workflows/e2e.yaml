@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VCLUSTER_VERSION: v0.20.0-beta.5
+  VCLUSTER_VERSION: v0.20.0
   VCLUSTER_SUFFIX: vcluster
   VCLUSTER_NAME: vcluster
   VCLUSTER_NAMESPACE: vcluster
@@ -68,7 +68,7 @@ jobs:
           curl -L -o vcluster "https://github.com/loft-sh/vcluster/releases/download/${{ env.VCLUSTER_VERSION }}/vcluster-linux-amd64" && sudo install -c -m 0755 vcluster /usr/local/bin && rm -f vcluster
 
           # vcluster create
-          vcluster create ${{ env.VCLUSTER_SUFFIX }} --activate=false -n ${{ env.VCLUSTER_NAMESPACE }} \
+          vcluster create ${{ env.VCLUSTER_SUFFIX }} -n ${{ env.VCLUSTER_NAMESPACE }} \
           --create-namespace \
           --debug \
           --connect=false \

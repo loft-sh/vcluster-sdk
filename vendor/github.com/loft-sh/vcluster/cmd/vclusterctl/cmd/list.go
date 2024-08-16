@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"cmp"
+	"fmt"
+
 	"github.com/loft-sh/log"
 	"github.com/loft-sh/vcluster/pkg/cli"
+	"github.com/loft-sh/vcluster/pkg/cli/config"
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
-	"github.com/loft-sh/vcluster/pkg/platform"
 	"github.com/spf13/cobra"
 )
 
@@ -26,8 +29,7 @@ func NewListCmd(globalFlags *flags.GlobalFlags) *cobra.Command {
 	cobraCmd := &cobra.Command{
 		Use:   "list",
 		Short: "Lists all virtual clusters",
-		Long: `
-#######################################################
+		Long: `#######################################################
 #################### vcluster list ####################
 #######################################################
 Lists all virtual clusters
@@ -40,27 +42,28 @@ vcluster list --namespace test
 	`,
 		Args:    cobra.NoArgs,
 		Aliases: []string{"ls"},
-		RunE: func(cobraCmd *cobra.Command, args []string) error {
-			return cmd.Run(cobraCmd, args)
+		RunE: func(cobraCmd *cobra.Command, _ []string) error {
+			return cmd.Run(cobraCmd)
 		},
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Manager, "manager", "", "The manager to use for managing the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm or platform.")
 	cobraCmd.Flags().StringVar(&cmd.Output, "output", "table", "Choose the format of the output. [table|json]")
 
 	return cobraCmd
 }
 
 // Run executes the functionality
-func (cmd *ListCmd) Run(cobraCmd *cobra.Command, _ []string) error {
-	manager, err := platform.GetManager(cmd.Manager)
-	if err != nil {
-		return err
-	}
+func (cmd *ListCmd) Run(cobraCmd *cobra.Command) error {
+	cfg := cmd.LoadedConfig(cmd.log)
 
-	// check if we should create a platform vCluster
-	if manager == platform.ManagerPlatform {
-		return cli.ListPlatform(cobraCmd.Context(), &cmd.ListOptions, cmd.GlobalFlags, cmd.log)
+	// If driver has been passed as flag use it, otherwise read it from the config file
+	driverType, err := config.ParseDriverType(cmp.Or(cmd.Driver, string(cfg.Driver.Type)))
+	if err != nil {
+		return fmt.Errorf("parse driver type: %w", err)
+	}
+	if driverType == config.PlatformDriver {
+		return cli.ListPlatform(cobraCmd.Context(), &cmd.ListOptions, cmd.GlobalFlags, cmd.log, "")
 	}
 
 	return cli.ListHelm(cobraCmd.Context(), &cmd.ListOptions, cmd.GlobalFlags, cmd.log)

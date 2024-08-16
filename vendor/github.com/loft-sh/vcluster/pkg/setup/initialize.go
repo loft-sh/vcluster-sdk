@@ -88,7 +88,7 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 
 		// create certificates if they are not there yet
 		certificatesDir := "/data/k0s/pki"
-		err = GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options.Networking.Advanced.ClusterDomain)
+		err = GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 
 		// generate etcd certificates
 		certificatesDir := "/data/pki"
-		err = GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options.Networking.Advanced.ClusterDomain)
+		err = GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options)
 		if err != nil {
 			return err
 		}
@@ -165,11 +165,11 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 				klog.Fatalf("Error running k3s: %v", err)
 			}
 		}()
-	case vclusterconfig.K8SDistro, vclusterconfig.EKSDistro:
+	case vclusterconfig.K8SDistro:
 		// try to generate k8s certificates
 		certificatesDir := filepath.Dir(options.VirtualClusterKubeConfig().ServerCACert)
 		if certificatesDir == "/data/pki" {
-			err := GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options.Networking.Advanced.ClusterDomain)
+			err := GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options)
 			if err != nil {
 				return err
 			}
@@ -205,15 +205,6 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 					options.ControlPlane.Distro.K8S.Scheduler,
 					options,
 				)
-			} else if distro == vclusterconfig.EKSDistro {
-				err = k8s.StartK8S(
-					parentCtx,
-					serviceCIDR,
-					options.ControlPlane.Distro.EKS.APIServer,
-					options.ControlPlane.Distro.EKS.ControllerManager,
-					options.ControlPlane.Distro.EKS.Scheduler,
-					options,
-				)
 			}
 			if err != nil {
 				klog.Fatalf("Error running k8s: %v", err)
@@ -223,7 +214,7 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 		certificatesDir := filepath.Dir(options.VirtualClusterKubeConfig().ServerCACert)
 		if certificatesDir == "/data/pki" {
 			// generate k8s certificates
-			err := GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options.Networking.Advanced.ClusterDomain)
+			err := GenerateCerts(ctx, options.ControlPlaneClient, options.Name, options.ControlPlaneNamespace, serviceCIDR, certificatesDir, options)
 			if err != nil {
 				return err
 			}
@@ -233,7 +224,8 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 	return nil
 }
 
-func GenerateCerts(ctx context.Context, currentNamespaceClient kubernetes.Interface, vClusterName, currentNamespace, serviceCIDR, certificatesDir, clusterDomain string) error {
+func GenerateCerts(ctx context.Context, currentNamespaceClient kubernetes.Interface, vClusterName, currentNamespace, serviceCIDR, certificatesDir string, options *config.VirtualClusterConfig) error {
+	clusterDomain := options.Networking.Advanced.ClusterDomain
 	// generate etcd server and peer sans
 	etcdService := vClusterName + "-etcd"
 	etcdSans := []string{
@@ -267,7 +259,7 @@ func GenerateCerts(ctx context.Context, currentNamespaceClient kubernetes.Interf
 	}
 
 	// generate certificates
-	err := certs.EnsureCerts(ctx, serviceCIDR, currentNamespace, currentNamespaceClient, vClusterName, certificatesDir, clusterDomain, etcdSans)
+	err := certs.EnsureCerts(ctx, serviceCIDR, currentNamespace, currentNamespaceClient, vClusterName, certificatesDir, etcdSans, options)
 	if err != nil {
 		return fmt.Errorf("ensure certs: %w", err)
 	}
