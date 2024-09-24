@@ -27,8 +27,7 @@ type CarSpec struct {
 	Seats int `json:"seats,omitempty"`
 }
 
-type CarStatus struct {
-}
+type CarStatus struct{}
 
 // CarType is the type of the car
 type CarType string

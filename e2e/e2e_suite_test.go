@@ -11,6 +11,7 @@ import (
 	ginkgo "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+
 	// Enable cloud provider auth
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
@@ -32,7 +33,7 @@ func TestRunE2ETests(t *testing.T) {
 		log.GetInstance().Fatalf("Error setting up framework: %v", err)
 	}
 
-	var _ = ginkgo.AfterSuite(func() {
+	_ = ginkgo.AfterSuite(func() {
 		err = framework.DefaultFramework.Cleanup()
 		if err != nil {
 			log.GetInstance().Warnf("Error executing testsuite cleanup: %v", err)

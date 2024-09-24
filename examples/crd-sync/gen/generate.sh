@@ -1,17 +1,21 @@
-# This file regenerates the CRDs and types for this example
-#
-# Make sure to install deep copy gen before
-# go install k8s.io/code-generator/cmd/deepcopy-gen@latest
-cd ..
+#!/usr/bin/env bash
 
-echo "Generate apis ..."
-deepcopy-gen --input-dirs github.com/loft-sh/vcluster-example/apis/... -o ./ --go-header-file ../../hack/boilerplate.txt  -O zz_generated.deepcopy
+set -o errexit
+set -o nounset
+set -o pipefail
 
-mv github.com/loft-sh/vcluster-example/apis/v1/zz_generated.deepcopy.go apis/v1/zz_generated.deepcopy.go
-rm -R github.com
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+SCRIPT_ROOT=${SCRIPT_DIR}/../../..
+
+KUBE_CODEGEN_ROOT="${SCRIPT_ROOT}/vendor/k8s.io/code-generator"
+source "${SCRIPT_ROOT}/vendor/k8s.io/code-generator/kube_codegen.sh"
+
+kube::codegen::gen_helpers \
+  --boilerplate "${SCRIPT_ROOT}/hack/boilerplate.txt" \
+  "examples/crd-sync"
 
 echo "Generate crd ..."
-go run gen/main.go > manifests/crds.yaml
+go run gen/main.go >manifests/crds.yaml
 
 echo "Update vendor"
 go mod vendor

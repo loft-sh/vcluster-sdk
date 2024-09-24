@@ -1,15 +1,13 @@
 module github.com/loft-sh/vcluster-sdk
 
-go 1.22.4
-
-toolchain go1.22.6
+go 1.23.0
 
 require (
 	github.com/ghodss/yaml v1.0.0
 	github.com/hashicorp/go-plugin v1.6.0
 	github.com/loft-sh/log v0.0.0-20240219160058-26d83ffb46ac
 	github.com/loft-sh/vcluster v0.20.0
-	github.com/onsi/ginkgo/v2 v2.17.2
+	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
 	github.com/pkg/errors v0.9.1
 	google.golang.org/grpc v1.64.0
@@ -17,6 +15,7 @@ require (
 	k8s.io/apimachinery v0.30.2
 	k8s.io/apiserver v0.30.2
 	k8s.io/client-go v0.30.2
+	k8s.io/code-generator v0.30.2
 	k8s.io/klog/v2 v2.120.1
 	sigs.k8s.io/controller-runtime v0.18.4
 )
@@ -118,7 +117,7 @@ require (
 	github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
-	github.com/nxadm/tail v1.4.8 // indirect
+	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/oklog/run v1.0.0 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/otiai10/copy v1.11.0 // indirect
@@ -180,6 +179,7 @@ require (
 	k8s.io/cli-runtime v0.30.2 // indirect
 	k8s.io/component-base v0.30.2 // indirect
 	k8s.io/component-helpers v0.30.2 // indirect
+	k8s.io/gengo/v2 v2.0.0-20240228010128-51d4e06bde70 // indirect
 	k8s.io/kms v0.30.2 // indirect
 	k8s.io/kube-aggregator v0.30.2 // indirect
 	k8s.io/kube-openapi v0.0.0-20240521193020-835d969ad83a // indirect
