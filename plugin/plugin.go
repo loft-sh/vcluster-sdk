@@ -10,9 +10,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var (
-	defaultManager = newManager()
-)
+var defaultManager = newManager()
 
 func MustInit() *synccontext.RegisterContext {
 	ctx, err := defaultManager.Init()

@@ -17,14 +17,14 @@ deployments:
       chart:
         name: vcluster
         repo: https://charts.loft.sh
-        version: v0.20.0-beta.5
+        version: v0.20.0
       values:
         controlPlane:
           advanced:
-            serviceAccount: 
+            serviceAccount:
               enabled: false
               name: default
-          statefulSet: 
+          statefulSet:
             probes:
               livenessProbe:
                 enabled: false
@@ -34,7 +34,7 @@ deployments:
 dev:
   vcluster:
     imageSelector: "ghcr.io/loft-sh/vcluster-pro"
-    devImage: golang:1.22.2
+    devImage: golang:1.23
     workingDir: /plugins/hooks
     container: syncer
     terminal:

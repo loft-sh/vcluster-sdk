@@ -30,9 +30,9 @@ var _ syncertypes.Initializer = &myDeploymentSyncer{}
 func (s *myDeploymentSyncer) Init(ctx *synccontext.RegisterContext) error {
 	err := applier.ApplyManifestFile(ctx.Context, ctx.VirtualManager.GetConfig(), MyDeploymentManifestPath)
 	if err != nil {
-		return fmt.Errorf("failed to apply manifest %s: %v", MyDeploymentManifestPath, err)
+		return fmt.Errorf("failed to apply manifest %s: %w", MyDeploymentManifestPath, err)
 	}
 
-	klog.Info("Successfully applied manifest", "manifest", MyDeploymentManifestPath)
+	klog.FromContext(ctx.Context).Info("Successfully applied manifest", "manifest", MyDeploymentManifestPath)
 	return err
 }

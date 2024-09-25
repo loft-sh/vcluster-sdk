@@ -7,7 +7,6 @@ import (
 	"github.com/loft-sh/vcluster-sdk/plugin"
 	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	synctypes "github.com/loft-sh/vcluster/pkg/types"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,7 +43,7 @@ func (s *secretHook) Init(ctx *synccontext.RegisterContext) error {
 	}
 	err = virtualClient.Create(ctx.Context, mySecret)
 	if err != nil && !kerrors.IsAlreadyExists(err) {
-		return errors.Wrap(err, "create secret")
+		return fmt.Errorf("create secret: %w", err)
 	}
 
 	return nil

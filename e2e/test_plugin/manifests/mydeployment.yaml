@@ -16,5 +16,5 @@ spec:
         app: mydeployment
     spec:
       containers:
-      - name: mydeployment
-        image: k8s.gcr.io/pause:3.2
+        - name: mydeployment
+          image: k8s.gcr.io/pause:3.2

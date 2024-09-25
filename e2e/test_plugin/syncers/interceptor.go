@@ -18,8 +18,7 @@ import (
 
 var _ plugin.Interceptor = DummyInterceptor{}
 
-type DummyInterceptor struct {
-}
+type DummyInterceptor struct{}
 
 func (d DummyInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	scheme := runtime.NewScheme()
@@ -31,7 +30,8 @@ func (d DummyInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		negotiation.DefaultEndpointRestrictions,
 		schema.GroupVersion{
 			Group:   "",
-			Version: "v1"},
+			Version: "v1",
+		},
 		w,
 		r,
 		200,

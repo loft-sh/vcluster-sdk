@@ -1,21 +1,22 @@
-## Bootstrap With Deployment Plugin
+# Bootstrap With Deployment Plugin
 
-This example plugin applies a deployment manifest file in the vcluster on startup. 
+This example plugin applies a deployment manifest file in the vCluster on startup.
 
-For more information how to develop plugins in vcluster, please refer to the [official vcluster docs](https://www.vcluster.com/docs/plugins/overview).
+For more information how to develop plugins in vCluster, please refer to the
+[official vCluster docs](https://www.vcluster.com/docs/plugins/overview).
 
 ## Using the Plugin
 
-To use the plugin, create a new vcluster with the `plugin.yaml`:
+To use the plugin, create a new vCluster with the `plugin.yaml`:
 
-```
+```bash
 # Use public plugin.yaml
 vcluster create my-vcluster -n my-vcluster -f https://raw.githubusercontent.com/loft-sh/vcluster-sdk/main/examples/bootstrap-with-deployment/plugin.yaml
 ```
 
-After that, wait for vcluster to start up and check:
+After that, wait for vCluster to start up and check:
 
-```
+```bash
 # Check if deployment is in vcluster
 vcluster connect my-vcluster -n my-vcluster -- kubectl get deployments
 
@@ -24,8 +25,10 @@ kubectl get po -n my-vcluster
 ```
 
 ## Building the Plugin
+
 To just build the plugin image and push it to the registry, run:
-```
+
+```bash
 # Make sure vendor is updated
 go mod vendor
 
@@ -40,8 +43,9 @@ Then exchange the image in the `plugin.yaml`.
 
 ## Development
 
-General vcluster plugin project structure:
-```
+General vCluster plugin project structure:
+
+```text
 .
 ├── go.mod              # Go module definition
 ├── go.sum
@@ -54,26 +58,36 @@ General vcluster plugin project structure:
 └── manifests/          # Additional plugin resources
 ```
 
-Before starting to develop, make sure you have installed the following tools on your computer:
+Before starting to develop, make sure you have installed the following tools on
+your computer:
+
 - [docker](https://docs.docker.com/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) with a valid kube context configured
-- [helm](https://helm.sh/docs/intro/install/), which is used to deploy vcluster and the plugin
-- [vcluster CLI](https://www.vcluster.com/docs/getting-started/setup) v0.20.0 or higher
-- [DevSpace](https://devspace.sh/cli/docs/quickstart), which is used to spin up a development environment
+- [helm](https://helm.sh/docs/intro/install/), which is used to deploy vCluster
+  and the plugin
+- [vCluster CLI](https://www.vcluster.com/docs/getting-started/setup) v0.20.0 or
+  higher
+- [DevSpace](https://devspace.sh/cli/docs/quickstart), which is used to spin up
+  a development environment
 
 After successfully setting up the tools, start the development environment with:
-```
+
+```bash
 devspace dev -n vcluster
 ```
 
-After a while a terminal should show up with additional instructions. Enter the following command to start the plugin:
-```
+After a while a terminal should show up with additional instructions. Enter the
+following command to start the plugin:
+
+```bash
 go build -mod vendor -o plugin main.go && /vcluster/syncer start
 ```
 
-You can now change a file locally in your IDE and then restart the command in the terminal to apply the changes to the plugin.
+You can now change a file locally in your IDE and then restart the command in the
+terminal to apply the changes to the plugin.
 
 Delete the development environment with:
-```
+
+```bash
 devspace purge -n vcluster
 ```
