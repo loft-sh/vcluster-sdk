@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
@@ -54,7 +54,7 @@ jobs:
         run: |
           # Build plugin
           docker build . -f e2e/test_plugin/Dockerfile -t ghcr.io/loft-sh/test-plugin:v1
-          
+
           # Import to kind cluster
           kind load docker-image ghcr.io/loft-sh/test-plugin:v1
 
@@ -63,7 +63,7 @@ jobs:
         continue-on-error: true
         run: |
           set -x
-          
+
           # download vcluster cli
           curl -L -o vcluster "https://github.com/loft-sh/vcluster/releases/download/${{ env.VCLUSTER_VERSION }}/vcluster-linux-amd64" && sudo install -c -m 0755 vcluster /usr/local/bin && rm -f vcluster
 
