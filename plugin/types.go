@@ -4,9 +4,10 @@ import (
 	"context"
 	"net/http"
 
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
+	"github.com/loft-sh/vcluster/pkg/mappings/resources"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
-	syncertypes "github.com/loft-sh/vcluster/pkg/types"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
+	syncertypes "github.com/loft-sh/vcluster/pkg/syncer/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlmanager "sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -17,6 +18,9 @@ type Options struct {
 
 	// ModifyHostManager modifies options for the host manager
 	ModifyHostManager func(options *ctrlmanager.Options)
+
+	// RegisterMappings will start the default mappings
+	RegisterMappings []resources.BuildMapper
 }
 
 type Manager interface {

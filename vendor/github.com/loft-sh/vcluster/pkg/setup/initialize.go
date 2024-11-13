@@ -195,17 +195,14 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 		go func() {
 			// we need to run this with the parent ctx as otherwise this context will be cancelled by the wait
 			// loop in Initialize
-			var err error
-			if distro == vclusterconfig.K8SDistro {
-				err = k8s.StartK8S(
-					parentCtx,
-					serviceCIDR,
-					options.ControlPlane.Distro.K8S.APIServer,
-					options.ControlPlane.Distro.K8S.ControllerManager,
-					options.ControlPlane.Distro.K8S.Scheduler,
-					options,
-				)
-			}
+			err := k8s.StartK8S(
+				parentCtx,
+				serviceCIDR,
+				options.ControlPlane.Distro.K8S.APIServer,
+				options.ControlPlane.Distro.K8S.ControllerManager,
+				options.ControlPlane.Distro.K8S.Scheduler,
+				options,
+			)
 			if err != nil {
 				klog.Fatalf("Error running k8s: %v", err)
 			}
@@ -272,6 +269,10 @@ func UpdateSecretWithK0sCerts(
 	currentNamespaceClient kubernetes.Interface,
 	currentNamespace, vClusterName string,
 ) error {
+	if currentNamespaceClient == nil {
+		return errors.New("nil currentNamespaceClient")
+	}
+
 	// wait for k0s to generate the secrets for us
 	files, err := waitForK0sFiles(ctx, "/data/k0s/pki")
 	if err != nil {

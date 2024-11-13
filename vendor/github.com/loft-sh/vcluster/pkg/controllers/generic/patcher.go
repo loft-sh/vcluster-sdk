@@ -1,11 +1,10 @@
 package generic
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/loft-sh/vcluster/pkg/controllers/syncer/translator"
 	"github.com/loft-sh/vcluster/pkg/log"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -18,11 +17,19 @@ import (
 var fieldManager = "vcluster-syncer"
 
 type ObjectPatcherAndMetadataTranslator interface {
-	translator.MetadataTranslator
+	TranslateMetadata(ctx *synccontext.SyncContext, pObj client.Object) client.Object
 	ObjectPatcher
 }
 
 var ErrNoUpdateNeeded = errors.New("no update needed")
+
+func IgnoreAcceptableErrors(err error) error {
+	if errors.Is(err, ErrNoUpdateNeeded) {
+		return nil
+	}
+
+	return err
+}
 
 // ObjectPatcher is the heart of the export and import syncers. The following functions are executed based on the lifecycle:
 // During Creation:
@@ -44,7 +51,7 @@ type ObjectPatcher interface {
 	// * originalObj is the host object
 	// * translatedObj is the translated host object to virtual (rewritten metadata)
 	// * existingOtherObj is the existing virtual object (can be nil if there is none yet)
-	ServerSideApply(ctx context.Context, originalObj, translatedObj, existingOtherObj client.Object) error
+	ServerSideApply(ctx *synccontext.SyncContext, originalObj, translatedObj, existingOtherObj client.Object) error
 
 	// ReverseUpdate updates the destObj before running ServerSideApply. This can be useful to sync back
 	// certain fields. Be careful that everything synced through this function **needs** to be excluded in
@@ -58,7 +65,7 @@ type ObjectPatcher interface {
 	// For import syncers:
 	// * destObj is the host object
 	// * sourceObj is the virtual object
-	ReverseUpdate(ctx context.Context, destObj, sourceObj client.Object) error
+	ReverseUpdate(ctx *synccontext.SyncContext, destObj, sourceObj client.Object) error
 }
 
 func NewPatcher(fromClient, toClient client.Client, statusIsSubresource bool, log log.Logger) *Patcher {
@@ -77,7 +84,7 @@ type Patcher struct {
 	statusIsSubresource bool
 }
 
-func (s *Patcher) ApplyPatches(ctx context.Context, fromObj, toObj client.Object, modifier ObjectPatcherAndMetadataTranslator) (client.Object, error) {
+func (s *Patcher) ApplyPatches(ctx *synccontext.SyncContext, fromObj, toObj client.Object, modifier ObjectPatcherAndMetadataTranslator) (client.Object, error) {
 	translatedObject := modifier.TranslateMetadata(ctx, fromObj)
 	toObjBase, err := toUnstructured(translatedObject)
 	if err != nil {
@@ -88,10 +95,6 @@ func (s *Patcher) ApplyPatches(ctx context.Context, fromObj, toObj client.Object
 	// apply patches on from object
 	err = modifier.ServerSideApply(ctx, fromObj, toObjCopied, toObj)
 	if err != nil {
-		if toObj != nil && errors.Is(err, ErrNoUpdateNeeded) {
-			return nil, nil
-		}
-
 		return nil, fmt.Errorf("error applying patches: %w", err)
 	}
 
@@ -128,7 +131,7 @@ func (s *Patcher) ApplyPatches(ctx context.Context, fromObj, toObj client.Object
 	return outObject, nil
 }
 
-func (s *Patcher) ApplyReversePatches(ctx context.Context, fromObj, otherObj client.Object, modifier ObjectPatcherAndMetadataTranslator) (controllerutil.OperationResult, error) {
+func (s *Patcher) ApplyReversePatches(ctx *synccontext.SyncContext, fromObj, otherObj client.Object, modifier ObjectPatcherAndMetadataTranslator) (controllerutil.OperationResult, error) {
 	originalUnstructured, err := toUnstructured(fromObj)
 	if err != nil {
 		return controllerutil.OperationResultNone, err
@@ -190,6 +193,10 @@ func (s *Patcher) ApplyReversePatches(ctx context.Context, fromObj, otherObj cli
 }
 
 func toUnstructured(obj client.Object) (*unstructured.Unstructured, error) {
+	if obj == nil {
+		return nil, errors.New("nil obj")
+	}
+
 	fromCopied, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj.DeepCopyObject())
 	if err != nil {
 		return nil, err

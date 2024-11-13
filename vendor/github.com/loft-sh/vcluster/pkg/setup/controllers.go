@@ -8,36 +8,47 @@ import (
 
 	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/controllers"
+	"github.com/loft-sh/vcluster/pkg/controllers/deploy"
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/services"
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	"github.com/loft-sh/vcluster/pkg/coredns"
+	"github.com/loft-sh/vcluster/pkg/log"
 	"github.com/loft-sh/vcluster/pkg/plugin"
 	"github.com/loft-sh/vcluster/pkg/pro"
 	"github.com/loft-sh/vcluster/pkg/specialservices"
-	syncertypes "github.com/loft-sh/vcluster/pkg/types"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
+	syncertypes "github.com/loft-sh/vcluster/pkg/syncer/types"
 	"github.com/loft-sh/vcluster/pkg/util/kubeconfig"
-	"github.com/loft-sh/vcluster/pkg/util/loghelper"
+	"github.com/loft-sh/vcluster/pkg/util/serviceaccount"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func StartControllers(controllerContext *config.ControllerContext) error {
+func StartControllers(controllerContext *synccontext.ControllerContext, syncers []syncertypes.Object) error {
 	// exchange control plane client
 	controlPlaneClient, err := pro.ExchangeControlPlaneClient(controllerContext)
 	if err != nil {
 		return err
 	}
 
+	// register init manifests configmap watcher controller
+	err = deploy.RegisterInitManifestsController(controllerContext)
+	if err != nil {
+		return err
+	}
+
 	// start coredns & create syncers
-	var syncers []syncertypes.Object
 	if !controllerContext.Config.Experimental.SyncSettings.DisableSync {
 		// setup CoreDNS according to the manifest file
 		// skip this if both integrated and dedicated coredns
@@ -59,18 +70,6 @@ func StartControllers(controllerContext *config.ControllerContext) error {
 				}
 			}
 		}()
-
-		// init syncers
-		syncers, err = controllers.Create(controllerContext)
-		if err != nil {
-			return errors.Wrap(err, "instantiate controllers")
-		}
-	}
-
-	// start managers
-	err = StartManagers(controllerContext, syncers)
-	if err != nil {
-		return err
 	}
 
 	// sync remote Endpoints
@@ -115,6 +114,12 @@ func StartControllers(controllerContext *config.ControllerContext) error {
 
 	// if not noop syncer
 	if !controllerContext.Config.Experimental.SyncSettings.DisableSync {
+		// migrate mappers
+		err = MigrateMappers(controllerContext.ToRegisterContext(), syncers)
+		if err != nil {
+			return err
+		}
+
 		// make sure the kubernetes service is synced
 		err = SyncKubernetesService(controllerContext)
 		if err != nil {
@@ -143,12 +148,15 @@ func StartControllers(controllerContext *config.ControllerContext) error {
 
 	// write the kube config to secret
 	go func() {
-		wait.Until(func() {
-			err := WriteKubeConfigToSecret(controllerContext.Context, controllerContext.Config.ControlPlaneNamespace, controlPlaneClient, controllerContext.Config, controllerContext.VirtualRawConfig)
+		_ = wait.PollUntilContextCancel(controllerContext, time.Second*10, true, func(ctx context.Context) (bool, error) {
+			err := WriteKubeConfigToSecret(ctx, controllerContext.VirtualManager.GetConfig(), controllerContext.Config.ControlPlaneNamespace, controlPlaneClient, controllerContext.Config, controllerContext.VirtualRawConfig)
 			if err != nil {
 				klog.Errorf("Error writing kube config to secret: %v", err)
+				return false, nil
 			}
-		}, time.Minute, controllerContext.StopChan)
+
+			return true, nil
+		})
 	}()
 
 	// set leader
@@ -157,10 +165,15 @@ func StartControllers(controllerContext *config.ControllerContext) error {
 		return fmt.Errorf("plugin set leader: %w", err)
 	}
 
+	// start mappings store garbage collection
+	controllerContext.Mappings.Store().StartGarbageCollection(controllerContext.Context)
+
+	// we are done here
+	klog.FromContext(controllerContext).Info("Successfully started vCluster controllers")
 	return nil
 }
 
-func ApplyCoreDNS(controllerContext *config.ControllerContext) {
+func ApplyCoreDNS(controllerContext *synccontext.ControllerContext) {
 	_ = wait.ExponentialBackoffWithContext(controllerContext.Context, wait.Backoff{Duration: time.Second, Factor: 1.5, Cap: time.Minute, Steps: math.MaxInt32}, func(ctx context.Context) (bool, error) {
 		err := coredns.ApplyManifest(ctx, controllerContext.Config.ControlPlane.Advanced.DefaultImageRegistry, controllerContext.VirtualManager.GetConfig(), controllerContext.VirtualClusterVersion)
 		if err != nil {
@@ -176,16 +189,9 @@ func ApplyCoreDNS(controllerContext *config.ControllerContext) {
 	})
 }
 
-func SyncKubernetesService(ctx *config.ControllerContext) error {
+func SyncKubernetesService(ctx *synccontext.ControllerContext) error {
 	err := specialservices.SyncKubernetesService(
-		&synccontext.SyncContext{
-			Context:                ctx.Context,
-			Log:                    loghelper.New("sync-kubernetes-service"),
-			PhysicalClient:         ctx.LocalManager.GetClient(),
-			VirtualClient:          ctx.VirtualManager.GetClient(),
-			CurrentNamespace:       ctx.Config.WorkloadNamespace,
-			CurrentNamespaceClient: ctx.WorkloadNamespaceClient,
-		},
+		ctx.ToRegisterContext().ToSyncContext("sync-kubernetes-service"),
 		ctx.Config.WorkloadNamespace,
 		ctx.Config.WorkloadService,
 		types.NamespacedName{
@@ -205,98 +211,107 @@ func SyncKubernetesService(ctx *config.ControllerContext) error {
 	return nil
 }
 
-func StartManagers(controllerContext *config.ControllerContext, syncers []syncertypes.Object) error {
-	// execute controller initializers to setup prereqs, etc.
-	err := controllers.ExecuteInitializers(controllerContext, syncers)
-	if err != nil {
-		return errors.Wrap(err, "execute initializers")
-	}
-
-	// register indices
-	err = controllers.RegisterIndices(controllerContext, syncers)
-	if err != nil {
-		return err
-	}
-
-	// start the local manager
-	go func() {
-		err := controllerContext.LocalManager.Start(controllerContext.Context)
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	// start the virtual cluster manager
-	go func() {
-		err := controllerContext.VirtualManager.Start(controllerContext.Context)
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	// Wait for caches to be synced
-	klog.Infof("Starting local & virtual managers...")
-	controllerContext.LocalManager.GetCache().WaitForCacheSync(controllerContext.Context)
-	controllerContext.VirtualManager.GetCache().WaitForCacheSync(controllerContext.Context)
-	klog.Infof("Successfully started local & virtual manager")
-
-	return nil
-}
-
-func WriteKubeConfigToSecret(ctx context.Context, currentNamespace string, currentNamespaceClient client.Client, options *config.VirtualClusterConfig, syncerConfig *clientcmdapi.Config) error {
+func WriteKubeConfigToSecret(ctx context.Context, virtualConfig *rest.Config, currentNamespace string, currentNamespaceClient client.Client, options *config.VirtualClusterConfig, syncerConfig *clientcmdapi.Config) error {
 	syncerConfig, err := CreateVClusterKubeConfig(syncerConfig, options)
 	if err != nil {
 		return err
 	}
 
-	if options.ExportKubeConfig.Context != "" {
-		syncerConfig.CurrentContext = options.ExportKubeConfig.Context
-		// update authInfo
-		for k := range syncerConfig.AuthInfos {
-			syncerConfig.AuthInfos[syncerConfig.CurrentContext] = syncerConfig.AuthInfos[k]
-			if k != syncerConfig.CurrentContext {
-				delete(syncerConfig.AuthInfos, k)
+	var customSyncerConfig *clientcmdapi.Config
+	if options.ExportKubeConfig.Server != "" {
+		// Create a deep copy of syncerConfig to modify the server for the additional secret
+		customSyncerConfig = syncerConfig.DeepCopy()
+		for key, cluster := range customSyncerConfig.Clusters {
+			if cluster != nil {
+				customSyncerConfig.Clusters[key] = &clientcmdapi.Cluster{
+					Server:                   options.ExportKubeConfig.Server,
+					Extensions:               make(map[string]runtime.Object),
+					CertificateAuthorityData: cluster.CertificateAuthorityData,
+					InsecureSkipTLSVerify:    options.ExportKubeConfig.Insecure,
+				}
 			}
-			break
-		}
-
-		// update cluster
-		for k := range syncerConfig.Clusters {
-			syncerConfig.Clusters[syncerConfig.CurrentContext] = syncerConfig.Clusters[k]
-			if k != syncerConfig.CurrentContext {
-				delete(syncerConfig.Clusters, k)
-			}
-			break
-		}
-
-		// update context
-		for k := range syncerConfig.Contexts {
-			tmpCtx := syncerConfig.Contexts[k]
-			tmpCtx.Cluster = syncerConfig.CurrentContext
-			tmpCtx.AuthInfo = syncerConfig.CurrentContext
-			syncerConfig.Contexts[syncerConfig.CurrentContext] = tmpCtx
-			if k != syncerConfig.CurrentContext {
-				delete(syncerConfig.Contexts, k)
-			}
-			break
 		}
 	}
 
-	// check if we need to write the kubeconfig secrete to the default location as well
+	// Apply service account token if specified
+	if options.ExportKubeConfig.ServiceAccount.Name != "" {
+		serviceAccountNamespace := options.ExportKubeConfig.ServiceAccount.Namespace
+		if serviceAccountNamespace == "" {
+			serviceAccountNamespace = "kube-system"
+		}
+
+		kubeClient, err := kubernetes.NewForConfig(virtualConfig)
+		if err != nil {
+			return fmt.Errorf("create kube client: %w", err)
+		}
+
+		token, err := serviceaccount.CreateServiceAccountToken(ctx, kubeClient, options.ExportKubeConfig.ServiceAccount.Name, serviceAccountNamespace, options.ExportKubeConfig.ServiceAccount.ClusterRole, 0, log.NewFromExisting(klog.FromContext(ctx), "write-kube-context"))
+		if err != nil {
+			return fmt.Errorf("create service account token for export kube config: %w", err)
+		}
+
+		// Apply the token to both syncerConfig and customSyncerConfig (if it exists)
+		applyAuthToken(syncerConfig, token)
+		if customSyncerConfig != nil {
+			applyAuthToken(customSyncerConfig, token)
+		}
+	}
+
+	// Write the additional secret if specified
 	if options.ExportKubeConfig.Secret.Name != "" {
-		// which namespace should we create the additional secret in?
 		secretNamespace := options.ExportKubeConfig.Secret.Namespace
 		if secretNamespace == "" {
 			secretNamespace = currentNamespace
 		}
 
-		// write the extra secret
-		err = kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, options.ExportKubeConfig.Secret.Name, secretNamespace, syncerConfig, options.Experimental.IsolatedControlPlane.KubeConfig != "")
+		// Use customSyncerConfig for the additional secret if it was modified, else syncerConfig
+		err = kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, options.ExportKubeConfig.Secret.Name, secretNamespace, customSyncerConfig, options.Experimental.IsolatedControlPlane.KubeConfig != "")
 		if err != nil {
 			return fmt.Errorf("creating %s secret in the %s ns failed: %w", options.ExportKubeConfig.Secret.Name, secretNamespace, err)
 		}
 	}
 
-	// write the default Secret
+	// Write the default secret using syncerConfig, which retains the original Server value
 	return kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, kubeconfig.GetDefaultSecretName(translate.VClusterName), currentNamespace, syncerConfig, options.Experimental.IsolatedControlPlane.KubeConfig != "")
+}
+
+// applyAuthToken sets the provided token in all AuthInfos of the given config
+func applyAuthToken(config *clientcmdapi.Config, token string) {
+	for k := range config.AuthInfos {
+		config.AuthInfos[k] = &clientcmdapi.AuthInfo{
+			Token:                token,
+			Extensions:           make(map[string]runtime.Object),
+			ImpersonateUserExtra: make(map[string][]string),
+		}
+	}
+}
+
+func MigrateMappers(ctx *synccontext.RegisterContext, syncers []syncertypes.Object) error {
+	mappers := ctx.Mappings.List()
+	done := map[schema.GroupVersionKind]bool{}
+
+	// migrate mappers
+	for _, mapper := range mappers {
+		done[mapper.GroupVersionKind()] = true
+		err := mapper.Migrate(ctx, mapper)
+		if err != nil {
+			return fmt.Errorf("migrate mapper %s: %w", mapper.GroupVersionKind().String(), err)
+		}
+	}
+
+	// migrate syncers
+	for _, syncer := range syncers {
+		mapper, ok := syncer.(synccontext.Mapper)
+		if !ok || done[mapper.GroupVersionKind()] {
+			continue
+		}
+
+		done[mapper.GroupVersionKind()] = true
+		err := mapper.Migrate(ctx, mapper)
+		if err != nil {
+			return fmt.Errorf("migrate syncer mapper %s: %w", mapper.GroupVersionKind().String(), err)
+		}
+	}
+
+	return nil
 }

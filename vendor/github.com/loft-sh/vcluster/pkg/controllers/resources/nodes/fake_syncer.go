@@ -7,14 +7,12 @@ import (
 	"strings"
 
 	"github.com/loft-sh/vcluster/pkg/constants"
-	"github.com/pkg/errors"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
+	syncer "github.com/loft-sh/vcluster/pkg/syncer/types"
 	"k8s.io/apimachinery/pkg/api/equality"
 
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/nodes/nodeservice"
 	podtranslate "github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate"
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
-	"github.com/loft-sh/vcluster/pkg/controllers/syncer/translator"
-	syncer "github.com/loft-sh/vcluster/pkg/types"
 	"github.com/loft-sh/vcluster/pkg/util/random"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	corev1 "k8s.io/api/core/v1"
@@ -76,7 +74,7 @@ func (r *fakeNodeSyncer) FakeSyncToVirtual(ctx *synccontext.SyncContext, name ty
 	}
 
 	ctx.Log.Infof("Create fake node %s", name.Name)
-	return ctrl.Result{}, createFakeNode(ctx.Context, r.fakeKubeletIPs, r.fakeKubeletHostnames, r.nodeServiceProvider, ctx.VirtualClient, name.Name)
+	return ctrl.Result{}, createFakeNode(ctx, r.fakeKubeletIPs, r.fakeKubeletHostnames, r.nodeServiceProvider, ctx.VirtualClient, name.Name)
 }
 
 func (r *fakeNodeSyncer) FakeSync(ctx *synccontext.SyncContext, vObj client.Object) (ctrl.Result, error) {
@@ -90,16 +88,16 @@ func (r *fakeNodeSyncer) FakeSync(ctx *synccontext.SyncContext, vObj client.Obje
 		return ctrl.Result{}, err
 	} else if !needed {
 		ctx.Log.Infof("Delete fake node %s as it is not needed anymore", vObj.GetName())
-		return ctrl.Result{}, ctx.VirtualClient.Delete(ctx.Context, vObj)
+		return ctrl.Result{}, ctx.VirtualClient.Delete(ctx, vObj)
 	}
 
 	// check if we need to update node ips
 	updated := r.updateIfNeeded(ctx, node, node.Name)
 	if updated != nil {
 		ctx.Log.Infof("Update fake node %s", node.Name)
-		err := ctx.VirtualClient.Status().Update(ctx.Context, updated)
+		err := ctx.VirtualClient.Status().Update(ctx, updated)
 		if err != nil {
-			return ctrl.Result{}, errors.Wrap(err, "update node")
+			return ctrl.Result{}, fmt.Errorf("update node: %w", err)
 		}
 	}
 
@@ -117,7 +115,7 @@ func (r *fakeNodeSyncer) updateIfNeeded(ctx *synccontext.SyncContext, node *core
 	}
 
 	if r.fakeKubeletIPs {
-		nodeIP, err := r.nodeServiceProvider.GetNodeIP(ctx.Context, name)
+		nodeIP, err := r.nodeServiceProvider.GetNodeIP(ctx, name)
 		if err != nil {
 			ctx.Log.Errorf("error getting fake node ip: %v", err)
 		}
@@ -129,7 +127,7 @@ func (r *fakeNodeSyncer) updateIfNeeded(ctx *synccontext.SyncContext, node *core
 	}
 
 	if !equality.Semantic.DeepEqual(node.Status.Addresses, newAddresses) {
-		updated = translator.NewIfNil(updated, node)
+		updated = node.DeepCopy()
 		updated.Status.Addresses = newAddresses
 	}
 
@@ -137,7 +135,7 @@ func (r *fakeNodeSyncer) updateIfNeeded(ctx *synccontext.SyncContext, node *core
 }
 
 func (r *fakeNodeSyncer) nodeNeeded(ctx *synccontext.SyncContext, nodeName string) (bool, error) {
-	return isNodeNeededByPod(ctx.Context, ctx.VirtualClient, ctx.PhysicalClient, nodeName)
+	return isNodeNeededByPod(ctx, ctx.VirtualClient, ctx.PhysicalClient, nodeName)
 }
 
 // this is not a real guid, but it doesn't really matter because it should just look right and not be an actual guid
@@ -242,7 +240,7 @@ func createFakeNode(
 			BootID:                  newGUID(),
 			ContainerRuntimeVersion: "docker://19.3.12",
 			KernelVersion:           "4.19.76-fakelinux",
-			KubeProxyVersion:        FakeNodesVersion,
+			KubeProxyVersion:        FakeNodesVersion, //nolint:staticcheck //deprecated, but we should continue to use it until the api removes it
 			KubeletVersion:          FakeNodesVersion,
 			MachineID:               newGUID(),
 			SystemUUID:              newGUID(),
@@ -262,7 +260,7 @@ func createFakeNode(
 	if fakeKubeletIPs {
 		nodeIP, err := nodeServiceProvider.GetNodeIP(ctx, name)
 		if err != nil {
-			return errors.Wrap(err, "create fake node ip")
+			return fmt.Errorf("create fake node ip: %w", err)
 		}
 
 		node.Status.Addresses = append(node.Status.Addresses, corev1.NodeAddress{

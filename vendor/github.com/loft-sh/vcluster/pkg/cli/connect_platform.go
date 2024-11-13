@@ -10,6 +10,7 @@ import (
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
 	"github.com/loft-sh/vcluster/pkg/platform"
 	"github.com/loft-sh/vcluster/pkg/platform/clihelper"
+	"github.com/loft-sh/vcluster/pkg/util/serviceaccount"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -33,6 +34,9 @@ func ConnectPlatform(ctx context.Context, options *ConnectOptions, globalFlags *
 	if err != nil {
 		return fmt.Errorf("get platform vcluster %s: %w", vClusterName, err)
 	}
+	if vCluster == nil {
+		return errors.New("empty vCluster")
+	}
 
 	// create connect platform command
 	cmd := connectPlatform{
@@ -54,9 +58,17 @@ func ConnectPlatform(ctx context.Context, options *ConnectOptions, globalFlags *
 	}
 
 	// wait for vCluster to become ready
-	vCluster.VirtualCluster, err = platform.WaitForVirtualClusterInstance(ctx, managementClient, vCluster.VirtualCluster.Namespace, vCluster.VirtualCluster.Name, true, log)
+	if vCluster.VirtualCluster == nil {
+		return errors.New("nil virtual cluster object")
+	}
+
+	vc, err := platform.WaitForVirtualClusterInstance(ctx, managementClient, vCluster.VirtualCluster.Namespace, vCluster.VirtualCluster.Name, true, log)
 	if err != nil {
 		return err
+	}
+	vCluster.VirtualCluster = vc
+	if vCluster.VirtualCluster == nil {
+		return errors.New("platform returned empty virtual cluster")
 	}
 
 	// retrieve vCluster kube config
@@ -101,7 +113,7 @@ func (cmd *connectPlatform) getVClusterKubeConfig(ctx context.Context, platformC
 	}
 
 	// make sure access key is set
-	if contextOptions.Token == "" && len(contextOptions.ClientCertificateData) == 0 && len(contextOptions.ClientKeyData) == 0 {
+	if contextOptions.Token == "" {
 		contextOptions.Token = platformClient.Config().Platform.AccessKey
 	}
 
@@ -145,8 +157,14 @@ func (cmd *connectPlatform) getVClusterKubeConfig(ctx context.Context, platformC
 			return nil, fmt.Errorf("forward token is not enabled on the virtual cluster and hence you cannot authenticate with a service account token")
 		}
 
+		// init client
+		vKubeClient, serviceAccount, serviceAccountNamespace, err := getServiceAccountClientAndName(*kubeConfig, cmd.ConnectOptions)
+		if err != nil {
+			return nil, err
+		}
+
 		// create service account token
-		token, err := createServiceAccountToken(ctx, *kubeConfig, cmd.ConnectOptions, cmd.log)
+		token, err := serviceaccount.CreateServiceAccountToken(ctx, vKubeClient, serviceAccount, serviceAccountNamespace, cmd.ServiceAccountClusterRole, int64(cmd.ServiceAccountExpiration), cmd.log)
 		if err != nil {
 			return nil, err
 		}

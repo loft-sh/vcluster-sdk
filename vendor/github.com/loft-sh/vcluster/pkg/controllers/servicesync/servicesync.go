@@ -2,10 +2,12 @@ package servicesync
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/loft-sh/vcluster/pkg/constants"
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/services"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"github.com/loft-sh/vcluster/pkg/util/loghelper"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	corev1 "k8s.io/api/core/v1"
@@ -21,6 +23,9 @@ import (
 )
 
 type ServiceSyncer struct {
+	Name        string
+	SyncContext *synccontext.SyncContext
+
 	SyncServices map[string]types.NamespacedName
 
 	IsVirtualToHostSyncer bool
@@ -47,7 +52,7 @@ func (e *ServiceSyncer) Register() error {
 		WithOptions(controller.Options{
 			CacheSyncTimeout: constants.DefaultCacheSyncTimeout,
 		}).
-		Named("servicesync").
+		Named(fmt.Sprintf("servicesyncer-%s", e.Name)).
 		For(&corev1.Service{}).
 		WatchesRawSource(source.Kind(e.To.GetCache(), &corev1.Service{}, handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, object *corev1.Service) []reconcile.Request {
 			if object == nil {
@@ -152,7 +157,7 @@ func (e *ServiceSyncer) syncServiceWithSelector(ctx context.Context, fromService
 			e.Log.Infof("Add owner reference to host target service %s", to.Name)
 			toService.OwnerReferences = translate.GetOwnerReference(nil)
 		}
-		toService.Spec.Selector = translate.Default.TranslateLabels(fromService.Spec.Selector, fromService.Namespace, nil)
+		toService.Spec.Selector = translate.HostLabelsMap(fromService.Spec.Selector, toService.Spec.Selector, fromService.Namespace, false)
 		e.Log.Infof("Create target service %s/%s because it is missing", to.Namespace, to.Name)
 		return ctrl.Result{}, e.To.GetClient().Create(ctx, toService)
 	} else if toService.Labels == nil || toService.Labels[translate.ControllerLabel] != "vcluster" {
@@ -162,7 +167,7 @@ func (e *ServiceSyncer) syncServiceWithSelector(ctx context.Context, fromService
 
 	// rewrite selector
 	targetService := toService.DeepCopy()
-	targetService.Spec.Selector = translate.Default.TranslateLabels(fromService.Spec.Selector, fromService.Namespace, nil)
+	targetService.Spec.Selector = translate.HostLabelsMap(fromService.Spec.Selector, toService.Spec.Selector, fromService.Namespace, false)
 
 	// compare service ports
 	if !apiequality.Semantic.DeepEqual(toService.Spec.Ports, fromService.Spec.Ports) || !apiequality.Semantic.DeepEqual(toService.Spec.Selector, targetService.Spec.Selector) {

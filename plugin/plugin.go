@@ -4,9 +4,9 @@ import (
 	"os"
 	"time"
 
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
-	syncertypes "github.com/loft-sh/vcluster/pkg/types"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
+	syncertypes "github.com/loft-sh/vcluster/pkg/syncer/types"
 	"k8s.io/klog/v2"
 )
 
@@ -24,6 +24,16 @@ func MustInit() *synccontext.RegisterContext {
 
 func Init() (*synccontext.RegisterContext, error) {
 	return defaultManager.Init()
+}
+
+func MustInitWithOptions(opts Options) *synccontext.RegisterContext {
+	ctx, err := defaultManager.InitWithOptions(opts)
+	if err != nil {
+		klog.Errorf("plugin must init: %v", err)
+		Exit(1)
+	}
+
+	return ctx
 }
 
 func InitWithOptions(opts Options) (*synccontext.RegisterContext, error) {

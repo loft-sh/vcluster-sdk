@@ -1,13 +1,14 @@
 package generic
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 
 	vclusterconfig "github.com/loft-sh/vcluster/config"
+	"github.com/loft-sh/vcluster/pkg/mappings"
 	"github.com/loft-sh/vcluster/pkg/patches"
 	patchesregex "github.com/loft-sh/vcluster/pkg/patches/regex"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -22,14 +23,16 @@ type exportPatcher struct {
 
 var _ ObjectPatcher = &exportPatcher{}
 
-func (e *exportPatcher) ServerSideApply(_ context.Context, fromObj, destObj, sourceObj client.Object) error {
+func (e *exportPatcher) ServerSideApply(ctx *synccontext.SyncContext, fromObj, destObj, sourceObj client.Object) error {
 	return patches.ApplyPatches(destObj, sourceObj, e.config.Patches, e.config.ReversePatches, &virtualToHostNameResolver{
+		syncContext: ctx,
+
 		namespace:       fromObj.GetNamespace(),
-		targetNamespace: translate.Default.PhysicalNamespace(fromObj.GetNamespace()),
+		targetNamespace: mappings.VirtualToHostNamespace(ctx, fromObj.GetNamespace()),
 	})
 }
 
-func (e *exportPatcher) ReverseUpdate(_ context.Context, destObj, sourceObj client.Object) error {
+func (e *exportPatcher) ReverseUpdate(_ *synccontext.SyncContext, destObj, sourceObj client.Object) error {
 	return patches.ApplyPatches(destObj, sourceObj, e.config.ReversePatches, nil, &hostToVirtualNameResolver{
 		gvk:  e.gvk,
 		pObj: sourceObj,
@@ -37,6 +40,8 @@ func (e *exportPatcher) ReverseUpdate(_ context.Context, destObj, sourceObj clie
 }
 
 type virtualToHostNameResolver struct {
+	syncContext *synccontext.SyncContext
+
 	namespace       string
 	targetNamespace string
 }
@@ -53,22 +58,19 @@ func (r *virtualToHostNameResolver) TranslateNameWithNamespace(name string, name
 				ns = namespace
 			}
 
-			return types.NamespacedName{
-				Namespace: translate.Default.PhysicalNamespace(namespace),
-				Name:      translate.Default.PhysicalName(name, ns),
-			}
+			return translate.Default.HostName(r.syncContext, name, ns)
 		}), nil
 	}
 
-	return translate.Default.PhysicalName(name, namespace), nil
+	return translate.Default.HostName(r.syncContext, name, namespace).Name, nil
 }
 
 func (r *virtualToHostNameResolver) TranslateLabelExpressionsSelector(selector *metav1.LabelSelector) (*metav1.LabelSelector, error) {
-	return translate.Default.TranslateLabelSelectorCluster(selector), nil
+	return translate.HostLabelSelector(selector), nil
 }
 
 func (r *virtualToHostNameResolver) TranslateLabelKey(key string) (string, error) {
-	return translate.Default.ConvertLabelKey(key), nil
+	return translate.HostLabel(key), nil
 }
 
 func (r *virtualToHostNameResolver) TranslateLabelSelector(selector map[string]string) (map[string]string, error) {
@@ -76,12 +78,11 @@ func (r *virtualToHostNameResolver) TranslateLabelSelector(selector map[string]s
 		MatchLabels: selector,
 	}
 
-	return metav1.LabelSelectorAsMap(
-		translate.Default.TranslateLabelSelector(labelSelector))
+	return metav1.LabelSelectorAsMap(translate.HostLabelSelector(labelSelector))
 }
 
 func (r *virtualToHostNameResolver) TranslateNamespaceRef(namespace string) (string, error) {
-	return translate.Default.PhysicalNamespace(namespace), nil
+	return mappings.VirtualToHostNamespace(r.syncContext, namespace), nil
 }
 
 func validateExportConfig(config *vclusterconfig.Export) error {

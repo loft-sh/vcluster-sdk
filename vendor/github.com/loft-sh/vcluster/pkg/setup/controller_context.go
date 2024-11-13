@@ -8,9 +8,14 @@ import (
 
 	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/nodes"
+	"github.com/loft-sh/vcluster/pkg/etcd"
+	"github.com/loft-sh/vcluster/pkg/mappings"
+	"github.com/loft-sh/vcluster/pkg/mappings/store"
+	"github.com/loft-sh/vcluster/pkg/mappings/store/verify"
 	"github.com/loft-sh/vcluster/pkg/plugin"
 	"github.com/loft-sh/vcluster/pkg/pro"
 	"github.com/loft-sh/vcluster/pkg/scheme"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"github.com/loft-sh/vcluster/pkg/telemetry"
 	"github.com/loft-sh/vcluster/pkg/util/blockingcacheclient"
 	"github.com/pkg/errors"
@@ -35,7 +40,7 @@ var NewLocalManager = ctrl.NewManager
 var NewVirtualManager = ctrl.NewManager
 
 // NewControllerContext builds the controller context we can use to start the syncer
-func NewControllerContext(ctx context.Context, options *config.VirtualClusterConfig) (*config.ControllerContext, error) {
+func NewControllerContext(ctx context.Context, options *config.VirtualClusterConfig) (*synccontext.ControllerContext, error) {
 	// load virtual config
 	virtualConfig, virtualRawConfig, err := loadVirtualConfig(ctx, options)
 	if err != nil {
@@ -141,6 +146,9 @@ func loadVirtualConfig(ctx context.Context, options *config.VirtualClusterConfig
 	if err != nil {
 		return nil, nil, err
 	}
+	if clientConfig == nil {
+		return nil, nil, errors.New("nil clientConfig")
+	}
 
 	virtualClusterConfig, err := clientConfig.ClientConfig()
 	if err != nil {
@@ -216,45 +224,95 @@ func CreateVClusterKubeConfig(config *clientcmdapi.Config, options *config.Virtu
 	config = config.DeepCopy()
 
 	// exchange kube config server & resolve certificate
-	for i := range config.Clusters {
+	for _, cluster := range config.Clusters {
+		if cluster == nil {
+			continue
+		}
+
 		// fill in data
-		if config.Clusters[i].CertificateAuthorityData == nil && config.Clusters[i].CertificateAuthority != "" {
-			o, err := os.ReadFile(config.Clusters[i].CertificateAuthority)
+		if cluster.CertificateAuthorityData == nil && cluster.CertificateAuthority != "" {
+			o, err := os.ReadFile(cluster.CertificateAuthority)
 			if err != nil {
 				return nil, err
 			}
 
-			config.Clusters[i].CertificateAuthority = ""
-			config.Clusters[i].CertificateAuthorityData = o
+			cluster.CertificateAuthority = ""
+			cluster.CertificateAuthorityData = o
 		}
 
-		if options.ExportKubeConfig.Server != "" {
-			config.Clusters[i].Server = options.ExportKubeConfig.Server
-		} else {
-			config.Clusters[i].Server = fmt.Sprintf("https://localhost:%d", options.ControlPlane.Proxy.Port)
-		}
+		cluster.Server = fmt.Sprintf("https://localhost:%d", options.ControlPlane.Proxy.Port)
 	}
 
 	// resolve auth info cert & key
-	for i := range config.AuthInfos {
-		// fill in data
-		if config.AuthInfos[i].ClientCertificateData == nil && config.AuthInfos[i].ClientCertificate != "" {
-			o, err := os.ReadFile(config.AuthInfos[i].ClientCertificate)
-			if err != nil {
-				return nil, err
-			}
-
-			config.AuthInfos[i].ClientCertificate = ""
-			config.AuthInfos[i].ClientCertificateData = o
+	for _, authInfo := range config.AuthInfos {
+		if authInfo == nil {
+			continue
 		}
-		if config.AuthInfos[i].ClientKeyData == nil && config.AuthInfos[i].ClientKey != "" {
-			o, err := os.ReadFile(config.AuthInfos[i].ClientKey)
+
+		// fill in data
+		if authInfo.ClientCertificateData == nil && authInfo.ClientCertificate != "" {
+			o, err := os.ReadFile(authInfo.ClientCertificate)
 			if err != nil {
 				return nil, err
 			}
 
-			config.AuthInfos[i].ClientKey = ""
-			config.AuthInfos[i].ClientKeyData = o
+			authInfo.ClientCertificate = ""
+			authInfo.ClientCertificateData = o
+		}
+		if authInfo.ClientKeyData == nil && authInfo.ClientKey != "" {
+			o, err := os.ReadFile(authInfo.ClientKey)
+			if err != nil {
+				return nil, err
+			}
+
+			authInfo.ClientKey = ""
+			authInfo.ClientKeyData = o
+		}
+	}
+
+	// exchange context name
+	if options.ExportKubeConfig.Context != "" {
+		config.CurrentContext = options.ExportKubeConfig.Context
+		// update authInfo
+		for k, authInfo := range config.AuthInfos {
+			if authInfo == nil {
+				continue
+			}
+
+			config.AuthInfos[config.CurrentContext] = authInfo
+			if k != config.CurrentContext {
+				delete(config.AuthInfos, k)
+			}
+			break
+		}
+
+		// update cluster
+		for k, cluster := range config.Clusters {
+			if cluster == nil {
+				continue
+			}
+
+			config.Clusters[config.CurrentContext] = cluster
+			if k != config.CurrentContext {
+				delete(config.Clusters, k)
+			}
+			break
+		}
+
+		// update context
+		for k, context := range config.Contexts {
+			if context == nil {
+				continue
+			}
+
+			tmpCtx := context
+			tmpCtx.Cluster = config.CurrentContext
+			tmpCtx.AuthInfo = config.CurrentContext
+			config.Contexts[config.CurrentContext] = tmpCtx
+			if k != config.CurrentContext {
+				delete(config.Contexts, k)
+			}
+			break
 		}
 	}
 
@@ -267,7 +325,14 @@ func initControllerContext(
 	virtualManager ctrl.Manager,
 	virtualRawConfig *clientcmdapi.Config,
 	vClusterOptions *config.VirtualClusterConfig,
-) (*config.ControllerContext, error) {
+) (*synccontext.ControllerContext, error) {
+	if localManager == nil {
+		return nil, errors.New("nil localManager")
+	}
+	if virtualManager == nil {
+		return nil, errors.New("nil virtualManager")
+	}
+
 	stopChan := make(<-chan struct{})
 
 	// get virtual cluster version
@@ -280,7 +345,7 @@ func initControllerContext(
 		return nil, errors.Wrap(err, "get virtual cluster version")
 	}
 	nodes.FakeNodesVersion = virtualClusterVersion.GitVersion
-	klog.Info("Can connect to virtual cluster with version " + virtualClusterVersion.GitVersion)
+	klog.FromContext(ctx).Info("Can connect to virtual cluster", "version", virtualClusterVersion.GitVersion)
 
 	// create a new current namespace client
 	currentNamespaceClient, err := newCurrentNamespaceClient(ctx, localManager, vClusterOptions)
@@ -298,7 +363,12 @@ func initControllerContext(
 		return nil, err
 	}
 
-	return &config.ControllerContext{
+	etcdClient, err := etcd.NewFromConfig(ctx, vClusterOptions)
+	if err != nil {
+		return nil, fmt.Errorf("create etcd client: %w", err)
+	}
+
+	controllerContext := &synccontext.ControllerContext{
 		Context:               ctx,
 		LocalManager:          localManager,
 		VirtualManager:        virtualManager,
@@ -309,10 +379,31 @@ func initControllerContext(
 
 		StopChan: stopChan,
 		Config:   vClusterOptions,
-	}, nil
+	}
+
+	mappingStore, err := store.NewStoreWithVerifyMapping(
+		ctx,
+		virtualManager.GetClient(),
+		localManager.GetClient(),
+		store.NewEtcdBackend(etcdClient),
+		verify.NewVerifyMapping(controllerContext.ToRegisterContext().ToSyncContext("verify-mapping")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("start mapping store: %w", err)
+	}
+
+	controllerContext.Mappings = mappings.NewMappingsRegistry(mappingStore)
+	return controllerContext, nil
 }
 
 func newCurrentNamespaceClient(ctx context.Context, localManager ctrl.Manager, options *config.VirtualClusterConfig) (client.Client, error) {
+	if localManager == nil {
+		return nil, errors.New("nil localManager")
+	}
+	if options == nil {
+		return nil, errors.New("nil options")
+	}
+
 	var err error
 
 	// currentNamespaceCache is needed for tasks such as finding out fake kubelet ips

@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/constants"
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/nodes/nodeservice"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,23 +33,23 @@ type Syncer interface {
 	dynamiccertificates.CertKeyContentProvider
 }
 
-func NewSyncer(_ context.Context, currentNamespace string, currentNamespaceClient client.Client, options *config.VirtualClusterConfig) (Syncer, error) {
+func NewSyncer(ctx *synccontext.ControllerContext) (Syncer, error) {
 	return &syncer{
-		clusterDomain: options.Networking.Advanced.ClusterDomain,
+		clusterDomain: ctx.Config.Networking.Advanced.ClusterDomain,
 
-		ingressHost: options.ControlPlane.Ingress.Host,
+		ingressHost: ctx.Config.ControlPlane.Ingress.Host,
 
-		serverCaKey:  options.VirtualClusterKubeConfig().ServerCAKey,
-		serverCaCert: options.VirtualClusterKubeConfig().ServerCACert,
+		serverCaKey:  ctx.Config.VirtualClusterKubeConfig().ServerCAKey,
+		serverCaCert: ctx.Config.VirtualClusterKubeConfig().ServerCACert,
 
-		fakeKubeletIPs: options.Networking.Advanced.ProxyKubelets.ByIP,
+		fakeKubeletIPs: ctx.Config.Networking.Advanced.ProxyKubelets.ByIP,
 
-		addSANs:   options.ControlPlane.Proxy.ExtraSANs,
+		addSANs:   ctx.Config.ControlPlane.Proxy.ExtraSANs,
 		listeners: []dynamiccertificates.Listener{},
 
-		serviceName:           options.WorkloadService,
-		currentNamespace:      currentNamespace,
-		currentNamespaceCient: currentNamespaceClient,
+		serviceName:           ctx.Config.WorkloadService,
+		currentNamespace:      ctx.Config.WorkloadNamespace,
+		currentNamespaceCient: ctx.WorkloadNamespaceClient,
 	}, nil
 }
 
@@ -191,6 +191,11 @@ func (s *syncer) getSANs(ctx context.Context) ([]string, error) {
 		}
 	}
 
+	// ingress host
+	if s.ingressHost != "" {
+		retSANs = append(retSANs, s.ingressHost)
+	}
+
 	// make sure other sans are there as well
 	retSANs = append(retSANs, s.addSANs...)
 	sort.Strings(retSANs)
@@ -214,7 +219,7 @@ func (s *syncer) regen(extraSANs []string) error {
 	klog.Infof("Generating serving cert for service ips: %v", extraSANs)
 
 	// GenServingCerts will write generated or updated cert/key to s.currentCert, s.currentKey
-	cert, key, _, err := GenServingCerts(s.serverCaCert, s.serverCaKey, s.currentCert, s.currentKey, s.clusterDomain, s.ingressHost, extraSANs)
+	cert, key, _, err := GenServingCerts(s.serverCaCert, s.serverCaKey, s.currentCert, s.currentKey, s.clusterDomain, extraSANs)
 	if err != nil {
 		return err
 	}

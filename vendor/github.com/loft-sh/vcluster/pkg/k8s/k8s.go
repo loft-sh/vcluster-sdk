@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	vclusterconfig "github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/config"
+	"github.com/loft-sh/vcluster/pkg/constants"
 	"github.com/loft-sh/vcluster/pkg/etcd"
 	"github.com/loft-sh/vcluster/pkg/pro"
 	"github.com/loft-sh/vcluster/pkg/util/commandwriter"
@@ -19,8 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
-
-const KineEndpoint = "unix:///data/kine.sock"
 
 func StartK8S(
 	ctx context.Context,
@@ -52,7 +52,7 @@ func StartK8S(
 			args = append(args, "--key-file="+vConfig.ControlPlane.BackingStore.Database.External.KeyFile)
 			args = append(args, "--cert-file="+vConfig.ControlPlane.BackingStore.Database.External.CertFile)
 			args = append(args, "--metrics-bind-address=0")
-			args = append(args, "--listen-address="+KineEndpoint)
+			args = append(args, "--listen-address="+constants.K8sKineEndpoint)
 
 			// now start kine
 			err := RunCommand(ctx, args, "kine")
@@ -61,7 +61,7 @@ func StartK8S(
 			}
 		}()
 
-		etcdEndpoints = KineEndpoint
+		etcdEndpoints = constants.K8sKineEndpoint
 	} else if vConfig.ControlPlane.BackingStore.Database.External.Enabled {
 		// we check for an empty datasource string here because the platform connect
 		// process may overwrite an empty datasource string with a platform supplied
@@ -134,7 +134,7 @@ func StartK8S(
 			args = append(args, apiServer.ExtraArgs...)
 
 			// wait until etcd is up and running
-			_, err := etcd.WaitForEtcdClient(ctx, etcdCertificates, etcdEndpoints)
+			err := etcd.WaitForEtcd(ctx, etcdCertificates, etcdEndpoints)
 			if err != nil {
 				return err
 			}
@@ -244,6 +244,24 @@ func RunCommand(ctx context.Context, command []string, component string) error {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Stdout = writer.Writer()
 	cmd.Stderr = writer.Writer()
+	cmd.Cancel = func() error {
+		err := cmd.Process.Signal(os.Interrupt)
+		if err != nil {
+			return fmt.Errorf("signal %s: %w", command[0], err)
+		}
+
+		state, err := cmd.Process.Wait()
+		if err == nil && state.Pid() > 0 {
+			time.Sleep(2 * time.Second)
+		}
+
+		err = cmd.Process.Kill()
+		if err != nil {
+			return fmt.Errorf("kill %s: %w", command[0], err)
+		}
+
+		return nil
+	}
 	err = cmd.Run()
 
 	// make sure we wait for scanner to be done
