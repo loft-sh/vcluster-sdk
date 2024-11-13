@@ -7,6 +7,7 @@ import (
 	examplev1 "github.com/loft-sh/vcluster-sdk/e2e/test_plugin/apis/v1"
 	"github.com/loft-sh/vcluster-sdk/e2e/test_plugin/syncers"
 	"github.com/loft-sh/vcluster-sdk/plugin"
+	"github.com/loft-sh/vcluster/pkg/mappings/resources"
 	"github.com/loft-sh/vcluster/pkg/scheme"
 	"k8s.io/klog/v2"
 )
@@ -20,7 +21,11 @@ type PluginConfig struct {
 
 func main() {
 	_ = examplev1.AddToScheme(scheme.Scheme)
-	ctx := plugin.MustInit()
+	ctx := plugin.MustInitWithOptions(plugin.Options{
+		RegisterMappings: []resources.BuildMapper{
+			resources.CreateSecretsMapper,
+		},
+	})
 	err := validateConfig()
 	if err != nil {
 		klog.Fatalf("validate config: %v", err)
@@ -29,8 +34,16 @@ func main() {
 	plugin.MustRegister(syncers.NewPodHook())
 	plugin.MustRegister(syncers.NewSecretHook())
 	plugin.MustRegister(syncers.NewMyDeploymentSyncer(ctx))
-	plugin.MustRegister(syncers.NewCarSyncer(ctx))
-	plugin.MustRegister(syncers.NewImportSecrets(ctx))
+	carSyncer, err := syncers.NewCarSyncer(ctx)
+	if err != nil {
+		klog.Fatalf("new car syncer: %v", err)
+	}
+	plugin.MustRegister(carSyncer)
+	importSecretSyncer, err := syncers.NewImportSecrets(ctx)
+	if err != nil {
+		klog.Fatalf("import secret syncer: %w", err)
+	}
+	plugin.MustRegister(importSecretSyncer)
 	plugin.MustRegister(syncers.DummyInterceptor{})
 
 	klog.Info("finished registering the plugins")

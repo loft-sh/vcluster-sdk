@@ -13,16 +13,15 @@ import (
 	"github.com/loft-sh/log/logr"
 	config2 "github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/config"
-	"github.com/loft-sh/vcluster/pkg/controllers/syncer"
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
 	"github.com/loft-sh/vcluster/pkg/plugin"
 	"github.com/loft-sh/vcluster/pkg/plugin/types"
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
 	"github.com/loft-sh/vcluster/pkg/scheme"
 	"github.com/loft-sh/vcluster/pkg/setup"
-	syncertypes "github.com/loft-sh/vcluster/pkg/types"
+	"github.com/loft-sh/vcluster/pkg/syncer"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
+	syncertypes "github.com/loft-sh/vcluster/pkg/syncer/types"
 	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
-	contextutil "github.com/loft-sh/vcluster/pkg/util/context"
 	"github.com/pkg/errors"
 	"k8s.io/apiserver/pkg/endpoints/handlers/responsewriters"
 	"k8s.io/client-go/rest"
@@ -178,8 +177,30 @@ func (m *manager) InitWithOptions(options Options) (*synccontext.RegisterContext
 		return nil, fmt.Errorf("create controller context: %w", err)
 	}
 
-	m.context = contextutil.ToRegisterContext(controllerCtx)
+	m.context = controllerCtx.ToRegisterContext()
 	m.proConfig = initConfig.Pro
+
+	// should register mappings?
+	if len(m.options.RegisterMappings) > 0 {
+		for _, createFunc := range m.options.RegisterMappings {
+			if createFunc == nil {
+				continue
+			}
+
+			mapper, err := createFunc(m.context)
+			if err != nil {
+				return nil, fmt.Errorf("create mapper: %w", err)
+			} else if mapper == nil {
+				continue
+			}
+
+			err = m.context.Mappings.AddMapper(mapper)
+			if err != nil {
+				return nil, fmt.Errorf("add mapper %s: %w", mapper.GroupVersionKind().String(), err)
+			}
+		}
+	}
+
 	return m.context, nil
 }
 
@@ -274,15 +295,6 @@ func (m *manager) start() error {
 	// start all syncers
 	klog.Infof("Starting syncers...")
 	for _, s := range m.syncers {
-		initializer, ok := s.(syncertypes.Initializer)
-		if ok {
-			err := initializer.Init(m.context)
-			if err != nil {
-				return errors.Wrapf(err, "init syncer %s", s.Name())
-			}
-		}
-	}
-	for _, s := range m.syncers {
 		indexRegisterer, ok := s.(syncertypes.IndicesRegisterer)
 		if ok {
 			err := indexRegisterer.RegisterIndices(m.context)
@@ -294,7 +306,7 @@ func (m *manager) start() error {
 
 	// start the local manager
 	go func() {
-		err := m.context.PhysicalManager.Start(m.context.Context)
+		err := m.context.PhysicalManager.Start(m.context)
 		if err != nil {
 			klog.Errorf("Starting physical manager: %v", err)
 			Exit(1)
@@ -303,7 +315,7 @@ func (m *manager) start() error {
 
 	// start the virtual cluster manager
 	go func() {
-		err := m.context.VirtualManager.Start(m.context.Context)
+		err := m.context.VirtualManager.Start(m.context)
 		if err != nil {
 			klog.Errorf("Starting virtual manager: %v", err)
 			Exit(1)
@@ -311,8 +323,19 @@ func (m *manager) start() error {
 	}()
 
 	// Wait for caches to be synced
-	m.context.PhysicalManager.GetCache().WaitForCacheSync(m.context.Context)
-	m.context.VirtualManager.GetCache().WaitForCacheSync(m.context.Context)
+	m.context.PhysicalManager.GetCache().WaitForCacheSync(m.context)
+	m.context.VirtualManager.GetCache().WaitForCacheSync(m.context)
+
+	// migrate syncers before starting the controllers
+	for _, v := range m.syncers {
+		mapper, ok := v.(synccontext.Mapper)
+		if ok {
+			err := mapper.Migrate(m.context, mapper)
+			if err != nil {
+				return fmt.Errorf("migrate syncer mapper %s: %w", mapper.GroupVersionKind().String(), err)
+			}
+		}
+	}
 
 	// start syncers
 	for _, v := range m.syncers {

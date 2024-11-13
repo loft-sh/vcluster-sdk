@@ -28,7 +28,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 		var err error
 		var virtualDeployments *appsv1.DeploymentList
 		gomega.Eventually(func() int {
-			virtualDeployments, err = f.VclusterClient.AppsV1().Deployments("default").List(f.Context, metav1.ListOptions{})
+			virtualDeployments, err = f.VClusterClient.AppsV1().Deployments("default").List(f.Context, metav1.ListOptions{})
 			framework.ExpectNoError(err)
 			return len(virtualDeployments.Items)
 		}).
@@ -39,7 +39,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 		// wait for pod to become ready
 		var podList *corev1.PodList
 		gomega.Eventually(func() bool {
-			podList, err = f.VclusterClient.CoreV1().Pods("default").List(f.Context, metav1.ListOptions{})
+			podList, err = f.VClusterClient.CoreV1().Pods("default").List(f.Context, metav1.ListOptions{})
 			framework.ExpectNoError(err)
 			return len(podList.Items) == 1 && podList.Items[0].Status.Phase == corev1.PodRunning
 		}).
@@ -50,7 +50,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 		// get pod in host cluster
 		pod := &podList.Items[0]
 		hostPod := &corev1.Pod{}
-		err = f.HostCRClient.Get(f.Context, types.NamespacedName{Name: translate.Default.PhysicalName(pod.Name, pod.Namespace), Namespace: translate.Default.PhysicalNamespace(pod.Namespace)}, hostPod)
+		err = f.HostCRClient.Get(f.Context, translate.Default.HostName(nil, pod.Name, pod.Namespace), hostPod)
 		framework.ExpectNoError(err)
 
 		// check if hook worked
@@ -71,7 +71,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 
 		// create car in vcluster
 		gomega.Eventually(func() bool {
-			err := f.VclusterCRClient.Create(f.Context, car)
+			err := f.VClusterCRClient.Create(f.Context, car)
 			return err == nil
 		}).
 			WithPolling(pollingInterval).
@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 
 		// wait for car to become synced
 		hostCar := &examplev1.Car{}
-		carName := types.NamespacedName{Name: translate.Default.PhysicalName(car.Name, car.Namespace), Namespace: translate.Default.PhysicalNamespace(car.Namespace)}
+		carName := translate.Default.HostName(nil, car.Name, car.Namespace)
 		gomega.Eventually(func() bool {
 			err := f.HostCRClient.Get(f.Context, carName, hostCar)
 			return err == nil
@@ -113,13 +113,13 @@ var _ = ginkgo.Describe("Plugin test", func() {
 		}
 
 		// create service
-		err := f.VclusterCRClient.Create(f.Context, service)
+		err := f.VClusterCRClient.Create(f.Context, service)
 		framework.ExpectNoError(err)
 
 		// wait for service to become synced
 		hostService := &corev1.Service{}
 		gomega.Eventually(func() bool {
-			err := f.HostCRClient.Get(f.Context, types.NamespacedName{Name: translate.Default.PhysicalName(service.Name, service.Namespace), Namespace: f.VclusterNamespace}, hostService)
+			err := f.HostCRClient.Get(f.Context, translate.Default.HostName(nil, service.Name, service.Namespace), hostService)
 			return err == nil
 		}).
 			WithPolling(pollingInterval).
@@ -154,7 +154,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 		// wait for secret to become synced
 		vSecret := &corev1.Secret{}
 		gomega.Eventually(func() bool {
-			err := f.VclusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
+			err := f.VClusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
 			return err == nil
 		}).
 			WithPolling(pollingInterval).
@@ -172,7 +172,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 
 		// wait for update
 		gomega.Eventually(func() bool {
-			err := f.VclusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
+			err := f.VClusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
 			return err == nil && string(vSecret.Data["test"]) == "newtest"
 		}).
 			WithPolling(pollingInterval).
@@ -185,7 +185,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 
 		// wait for delete within vCluster
 		gomega.Eventually(func() bool {
-			err := f.VclusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
+			err := f.VClusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
 			return kerrors.IsNotFound(err)
 		}).
 			WithPolling(pollingInterval).
@@ -196,7 +196,7 @@ var _ = ginkgo.Describe("Plugin test", func() {
 	ginkgo.It("check the interceptor", func() {
 		// wait for secret to become synced
 		vPod := &corev1.Pod{}
-		err := f.VclusterCRClient.Get(f.Context, types.NamespacedName{Name: "stuff", Namespace: "test"}, vPod)
+		err := f.VClusterCRClient.Get(f.Context, types.NamespacedName{Name: "stuff", Namespace: "test"}, vPod)
 		framework.ExpectNoError(err)
 
 		// check if secret is synced correctly

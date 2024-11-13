@@ -24,37 +24,10 @@ type Certificates struct {
 	ServerKey  string
 }
 
-func EndpointsAndCertificatesFromFlags(flags []string) ([]string, *Certificates, error) {
-	certificates := &Certificates{}
-	endpoints := []string{}
-
-	// parse flags
-	for _, arg := range flags {
-		if strings.HasPrefix(arg, "--etcd-servers=") {
-			endpoints = strings.Split(strings.TrimPrefix(arg, "--etcd-servers="), ",")
-		} else if strings.HasPrefix(arg, "--etcd-cafile=") {
-			certificates.CaCert = strings.TrimPrefix(arg, "--etcd-cafile=")
-		} else if strings.HasPrefix(arg, "--etcd-certfile=") {
-			certificates.ServerCert = strings.TrimPrefix(arg, "--etcd-certfile=")
-		} else if strings.HasPrefix(arg, "--etcd-keyfile=") {
-			certificates.ServerKey = strings.TrimPrefix(arg, "--etcd-keyfile=")
-		}
-	}
-
-	// fail if etcd servers is not found
-	if len(endpoints) == 0 {
-		return nil, nil, fmt.Errorf("couldn't find flag --etcd-servers within api-server flags")
-	} else if certificates.CaCert == "" || certificates.ServerCert == "" || certificates.ServerKey == "" {
-		return endpoints, nil, nil
-	}
-	return endpoints, certificates, nil
-}
-
-func WaitForEtcdClient(parentCtx context.Context, certificates *Certificates, endpoints ...string) (*clientv3.Client, error) {
-	var etcdClient *clientv3.Client
+func WaitForEtcd(parentCtx context.Context, certificates *Certificates, endpoints ...string) error {
 	var err error
 	waitErr := wait.PollUntilContextTimeout(parentCtx, time.Second, waitForClientTimeout, true, func(ctx context.Context) (bool, error) {
-		etcdClient, err = GetEtcdClient(parentCtx, certificates, endpoints...)
+		etcdClient, err := GetEtcdClient(ctx, certificates, endpoints...)
 		if err == nil {
 			defer func() {
 				_ = etcdClient.Close()
@@ -66,14 +39,14 @@ func WaitForEtcdClient(parentCtx context.Context, certificates *Certificates, en
 			}
 		}
 
-		klog.Infof("Couldn't connect to embedded etcd (will retry in a second): %v", err)
+		klog.Infof("Couldn't connect to etcd (will retry in a second): %v", err)
 		return false, nil
 	})
 	if waitErr != nil {
-		return nil, fmt.Errorf("error waiting for etcdclient: %w", err)
+		return fmt.Errorf("error waiting for etcd: %w", err)
 	}
 
-	return etcdClient, nil
+	return nil
 }
 
 // GetEtcdClient returns an etcd client connected to the specified endpoints.
@@ -94,21 +67,23 @@ func GetEtcdClient(ctx context.Context, certificates *Certificates, endpoints ..
 // If no endpoints are provided, getEndpoints is called to provide defaults.
 func getClientConfig(ctx context.Context, certificates *Certificates, endpoints ...string) (*clientv3.Config, error) {
 	config := &clientv3.Config{
-		Endpoints:            endpoints,
-		Context:              ctx,
-		DialTimeout:          2 * time.Second,
-		DialKeepAliveTime:    30 * time.Second,
-		DialKeepAliveTimeout: 10 * time.Second,
-		AutoSyncInterval:     10 * time.Second,
-		Logger:               zap.L().Named("etcd-client"),
-		PermitWithoutStream:  true,
+		Endpoints:   endpoints,
+		Context:     ctx,
+		DialTimeout: 5 * time.Second,
+
+		Logger: zap.L().Named("etcd-client"),
 	}
 
-	var err error
-	if strings.HasPrefix(endpoints[0], "https://") && certificates != nil {
-		config.TLS, err = toTLSConfig(certificates)
+	if len(endpoints) > 0 {
+		if strings.HasPrefix(endpoints[0], "https://") && certificates != nil {
+			var err error
+			if config.TLS, err = toTLSConfig(certificates); err != nil {
+				return nil, err
+			}
+		}
 	}
-	return config, err
+
+	return config, nil
 }
 
 func toTLSConfig(certificates *Certificates) (*tls.Config, error) {

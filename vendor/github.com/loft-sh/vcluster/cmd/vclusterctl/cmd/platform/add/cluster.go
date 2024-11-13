@@ -3,25 +3,26 @@ package add
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"time"
 
-	"github.com/loft-sh/log"
-	"github.com/sirupsen/logrus"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/wait"
-
 	managementv1 "github.com/loft-sh/api/v4/pkg/apis/management/v1"
 	storagev1 "github.com/loft-sh/api/v4/pkg/apis/storage/v1"
+	"github.com/loft-sh/log"
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
+	"github.com/loft-sh/vcluster/pkg/cli/util"
 	"github.com/loft-sh/vcluster/pkg/platform"
 	"github.com/loft-sh/vcluster/pkg/platform/clihelper"
 	"github.com/loft-sh/vcluster/pkg/platform/kube"
 	"github.com/loft-sh/vcluster/pkg/upgrade"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -60,12 +61,23 @@ Example:
 vcluster platform add cluster my-cluster
 ########################################################
 		`,
-		Args: cobra.ExactArgs(1),
 		RunE: func(cobraCmd *cobra.Command, args []string) error {
+			newArgs, err := util.PromptForArgs(cmd.Log, args, "cluster name")
+			if err != nil {
+				switch {
+				case errors.Is(err, util.ErrNonInteractive):
+					if err := cobra.ExactArgs(1)(cobraCmd, args); err != nil {
+						return err
+					}
+				default:
+					return err
+				}
+			}
+
 			// Check for newer version
 			upgrade.PrintNewerVersionWarning()
 
-			return cmd.Run(cobraCmd.Context(), args)
+			return cmd.Run(cobraCmd.Context(), newArgs)
 		},
 	}
 
@@ -162,6 +174,7 @@ func (cmd *ClusterCmd) Run(ctx context.Context, args []string) error {
 			"--namespace", namespace,
 			"--set", "agentOnly=true",
 			"--set", "image=" + cmp.Or(os.Getenv("DEVELOPMENT_IMAGE"), "ghcr.io/loft-sh/enterprise:release-test"),
+			"--set", "env.AGENT_IMAGE=" + cmp.Or(os.Getenv("AGENT_IMAGE"), os.Getenv("DEVELOPMENT_IMAGE"), "ghcr.io/loft-sh/enterprise:release-test"),
 		}
 	} else {
 		if cmd.HelmChartPath != "" {
@@ -234,13 +247,25 @@ func (cmd *ClusterCmd) Run(ctx context.Context, args []string) error {
 		return fmt.Errorf("create kube client: %w", err)
 	}
 
+	agentAlreadyInstalled := true
+	_, err = clientset.AppsV1().Deployments(cmd.Namespace).Get(ctx, "loft", metav1.GetOptions{})
+	if err != nil {
+		cmd.Log.Debugf("Error retrieving deployment: %v", err)
+		agentAlreadyInstalled = false
+	}
+
 	helmCmd := exec.CommandContext(ctx, "helm", helmArgs...)
 
 	helmCmd.Stdout = cmd.Log.Writer(logrus.DebugLevel, true)
 	helmCmd.Stderr = cmd.Log.Writer(logrus.DebugLevel, true)
 	helmCmd.Stdin = os.Stdin
 
-	cmd.Log.Info("Installing Loft agent...")
+	if agentAlreadyInstalled {
+		cmd.Log.Info("Existing vCluster Platform agent found")
+		cmd.Log.Info("Upgrading vCluster Platform agent...")
+	} else {
+		cmd.Log.Info("Installing vCluster Platform agent...")
+	}
 	cmd.Log.Debugf("Running helm command: %v", helmCmd.Args)
 
 	err = helmCmd.Run()
@@ -261,14 +286,18 @@ func (cmd *ClusterCmd) Run(ctx context.Context, args []string) error {
 				return false, err
 			}
 
-			return clusterInstance.Status.Phase == storagev1.ClusterStatusPhaseInitialized, nil
+			return clusterInstance != nil && clusterInstance.Status.Phase == storagev1.ClusterStatusPhaseInitialized, nil
 		})
 		if waitErr != nil {
 			return fmt.Errorf("get cluster: %w", waitErr)
 		}
 	}
 
-	cmd.Log.Donef("Successfully added cluster %s to the platform", clusterName)
+	if !agentAlreadyInstalled {
+		cmd.Log.Donef("Successfully added cluster %s to the platform", clusterName)
+	} else {
+		cmd.Log.Donef("Successfully upgraded platform agent")
+	}
 
 	return nil
 }

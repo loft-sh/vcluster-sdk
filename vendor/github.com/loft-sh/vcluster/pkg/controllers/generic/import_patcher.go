@@ -1,14 +1,12 @@
 package generic
 
 import (
-	"context"
 	"regexp"
 
 	vclusterconfig "github.com/loft-sh/vcluster/config"
-	"github.com/loft-sh/vcluster/pkg/constants"
+	"github.com/loft-sh/vcluster/pkg/mappings"
 	"github.com/loft-sh/vcluster/pkg/patches"
-	"github.com/loft-sh/vcluster/pkg/util/clienthelper"
-	corev1 "k8s.io/api/core/v1"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -20,17 +18,21 @@ type importPatcher struct {
 
 var _ ObjectPatcher = &importPatcher{}
 
-func (s *importPatcher) ServerSideApply(ctx context.Context, _, destObj, sourceObj client.Object) error {
-	return patches.ApplyPatches(destObj, sourceObj, s.config.Patches, s.config.ReversePatches, &hostToVirtualImportNameResolver{virtualClient: s.virtualClient, ctx: ctx})
+func (s *importPatcher) ServerSideApply(ctx *synccontext.SyncContext, _, destObj, sourceObj client.Object) error {
+	return patches.ApplyPatches(destObj, sourceObj, s.config.Patches, s.config.ReversePatches, &hostToVirtualImportNameResolver{
+		syncContext: ctx,
+	})
 }
 
-func (s *importPatcher) ReverseUpdate(_ context.Context, destObj, sourceObj client.Object) error {
-	return patches.ApplyPatches(destObj, sourceObj, s.config.ReversePatches, nil, &virtualToHostNameResolver{namespace: sourceObj.GetNamespace()})
+func (s *importPatcher) ReverseUpdate(ctx *synccontext.SyncContext, destObj, sourceObj client.Object) error {
+	return patches.ApplyPatches(destObj, sourceObj, s.config.ReversePatches, nil, &virtualToHostNameResolver{
+		syncContext: ctx,
+		namespace:   sourceObj.GetNamespace(),
+	})
 }
 
 type hostToVirtualImportNameResolver struct {
-	virtualClient client.Client
-	ctx           context.Context
+	syncContext *synccontext.SyncContext
 }
 
 func (r *hostToVirtualImportNameResolver) TranslateName(name string, _ *regexp.Regexp, _ string) (string, error) {
@@ -54,10 +56,6 @@ func (r *hostToVirtualImportNameResolver) TranslateLabelSelector(selector map[st
 }
 
 func (r *hostToVirtualImportNameResolver) TranslateNamespaceRef(namespace string) (string, error) {
-	vNamespace := (&corev1.Namespace{}).DeepCopyObject().(client.Object)
-	err := clienthelper.GetByIndex(r.ctx, r.virtualClient, vNamespace, constants.IndexByPhysicalName, namespace)
-	if err != nil {
-		return "", err
-	}
-	return vNamespace.GetName(), nil
+	vNamespace := mappings.HostToVirtual(r.syncContext, namespace, "", nil, mappings.Namespaces())
+	return vNamespace.Name, nil
 }

@@ -2,19 +2,17 @@ package nodes
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/loft-sh/vcluster/pkg/constants"
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
-	"github.com/loft-sh/vcluster/pkg/controllers/syncer/translator"
-	"github.com/pkg/errors"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/loft-sh/vcluster/pkg/util/stringutil"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/klog/v2"
 )
 
@@ -24,9 +22,7 @@ var (
 	RancherAgentPodLimitsAnnotation   = "management.cattle.io/pod-limits"
 )
 
-func (s *nodeSyncer) translateUpdateBackwards(pNode *corev1.Node, vNode *corev1.Node) *corev1.Node {
-	var updated *corev1.Node
-
+func (s *nodeSyncer) translateUpdateBackwards(pNode *corev1.Node, vNode *corev1.Node) {
 	// merge labels & taints
 	translatedSpec := pNode.Spec.DeepCopy()
 	excludeAnnotations := []string{TaintsAnnotation, RancherAgentPodRequestsAnnotation, RancherAgentPodLimitsAnnotation}
@@ -108,31 +104,21 @@ func (s *nodeSyncer) translateUpdateBackwards(pNode *corev1.Node, vNode *corev1.
 		translatedSpec.Taints = s.filterOutTaintsMatchingTolerations(translatedSpec.Taints)
 	}
 
-	if !equality.Semantic.DeepEqual(vNode.Spec, *translatedSpec) {
-		updated = translator.NewIfNil(updated, vNode)
-		updated.Spec = *translatedSpec
-	}
-
 	// add annotation to prevent scale down of node by cluster-autoscaler
 	// the env var NODE_NAME is set when only one replica of vcluster is running
 	if nodeName, set := os.LookupEnv("NODE_NAME"); set && nodeName == pNode.Name {
 		annotations["cluster-autoscaler.kubernetes.io/scale-down-disabled"] = "true"
 	}
 
-	if !equality.Semantic.DeepEqual(vNode.Annotations, annotations) {
-		updated = translator.NewIfNil(updated, vNode)
-		updated.Annotations = annotations
-	}
-
-	if !equality.Semantic.DeepEqual(vNode.Labels, labels) {
-		updated = translator.NewIfNil(updated, vNode)
-		updated.Labels = labels
-	}
-
-	return updated
+	// set annotations, spec & labels
+	vNode.Spec = *translatedSpec
+	vNode.Annotations = annotations
+	vNode.Labels = labels
 }
 
-func (s *nodeSyncer) translateUpdateStatus(ctx *synccontext.SyncContext, pNode *corev1.Node, vNode *corev1.Node) (*corev1.Node, error) {
+// translateUpdateStatus translates the node's status.
+// Returns a Node object, a boolean indicating whether it changed or an error.
+func (s *nodeSyncer) translateUpdateStatus(ctx *synccontext.SyncContext, pNode *corev1.Node, vNode *corev1.Node) error {
 	// translate node status first
 	translatedStatus := pNode.Status.DeepCopy()
 	if s.useFakeKubelets {
@@ -154,9 +140,9 @@ func (s *nodeSyncer) translateUpdateStatus(ctx *synccontext.SyncContext, pNode *
 
 		if s.fakeKubeletIPs {
 			// create new service for this node
-			nodeIP, err := s.nodeServiceProvider.GetNodeIP(ctx.Context, vNode.Name)
+			nodeIP, err := s.nodeServiceProvider.GetNodeIP(ctx, vNode.Name)
 			if err != nil {
-				return nil, errors.Wrap(err, "get vNode IP")
+				return fmt.Errorf("get vNode IP: %w", err)
 			}
 
 			newAddresses = append(newAddresses, corev1.NodeAddress{
@@ -186,12 +172,18 @@ func (s *nodeSyncer) translateUpdateStatus(ctx *synccontext.SyncContext, pNode *
 
 			var nonVClusterPods int64
 			podList := &corev1.PodList{}
-			err := s.unmanagedPodCache.List(ctx.Context, podList, client.MatchingFields{constants.IndexRunningNonVClusterPodsByNode: pNode.Name})
+			err := s.unmanagedPodCache.List(ctx, podList, client.MatchingFields{constants.IndexRunningNonVClusterPodsByNode: pNode.Name})
 			if err != nil {
 				klog.Errorf("Error listing pods: %v", err)
 			} else {
 				for _, pod := range podList.Items {
-					if !translate.Default.IsManaged(&pod, translate.Default.PhysicalName) {
+					isManaged, err := s.IsManaged(ctx, &pod)
+					if err != nil {
+						klog.FromContext(ctx).Error(err, "is pod managed")
+					}
+
+					// check if managed
+					if !isManaged {
 						// count pods that are not synced by this vcluster
 						nonVClusterPods++
 					}
@@ -259,14 +251,8 @@ func (s *nodeSyncer) translateUpdateStatus(ctx *synccontext.SyncContext, pNode *
 		translatedStatus.Images = make([]corev1.ContainerImage, 0)
 	}
 
-	// check if the status has changed
-	if !equality.Semantic.DeepEqual(vNode.Status, *translatedStatus) {
-		newNode := vNode.DeepCopy()
-		newNode.Status = *translatedStatus
-		return newNode, nil
-	}
-
-	return nil, nil
+	vNode.Status = *translatedStatus
+	return nil
 }
 
 func mergeStrings(physical []string, virtual []string, oldPhysical []string) []string {

@@ -1,80 +1,92 @@
 package translate
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 
+	"github.com/loft-sh/vcluster/pkg/patcher"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (t *translator) Diff(ctx context.Context, vPod, pPod *corev1.Pod) (*corev1.Pod, error) {
+func (t *translator) Diff(ctx *synccontext.SyncContext, event *synccontext.SyncEvent[*corev1.Pod]) error {
+	// sync conditions
+	event.Virtual.Status.Conditions, event.Host.Status.Conditions = patcher.CopyBidirectional(
+		event.VirtualOld.Status.Conditions,
+		event.Virtual.Status.Conditions,
+		event.HostOld.Status.Conditions,
+		event.Host.Status.Conditions,
+	)
+
+	// has status changed?
+	vPod := event.Virtual
+	pPod := event.Host
+	vPod.Status = *pPod.Status.DeepCopy()
+	stripInjectedSidecarContainers(vPod, pPod)
+
 	// get Namespace resource in order to have access to its labels
 	vNamespace := &corev1.Namespace{}
-	err := t.vClient.Get(ctx, client.ObjectKey{Name: vPod.ObjectMeta.GetNamespace()}, vNamespace)
+	err := t.vClient.Get(ctx, client.ObjectKey{Name: vPod.GetNamespace()}, vNamespace)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var updatedPod *corev1.Pod
-	updatedPodSpec := t.calcSpecDiff(pPod, vPod)
-	if updatedPodSpec != nil {
-		updatedPod = pPod.DeepCopy()
-		updatedPod.Spec = *updatedPodSpec
+	// spec diff
+	t.calcSpecDiff(pPod, vPod)
+
+	// bi-directionally sync labels & annotations
+	event.Virtual.Annotations, event.Host.Annotations = translate.AnnotationsBidirectionalUpdate(
+		event,
+		GetExcludedAnnotations(pPod)...,
+	)
+
+	// exclude namespace labels
+	excludeLabelsFn := func(key string, value interface{}) (string, interface{}) {
+		if strings.HasPrefix(key, translate.NamespaceLabelPrefix) {
+			return "", nil
+		}
+
+		return key, value
+	}
+	event.Virtual.Labels, event.Host.Labels = translate.LabelsBidirectionalUpdateFunction(
+		event,
+		excludeLabelsFn,
+		excludeLabelsFn,
+	)
+
+	// update namespace labels
+	for key := range event.Host.Labels {
+		if strings.HasPrefix(key, translate.NamespaceLabelPrefix) {
+			delete(event.Host.Labels, key)
+		}
+	}
+	for k, v := range vNamespace.GetLabels() {
+		event.Host.Labels[translate.HostLabelNamespace(k)] = v
 	}
 
-	// check annotations
-	_, updatedAnnotations, updatedLabels := translate.Default.ApplyMetadataUpdate(vPod, pPod, t.syncedLabels, getExcludedAnnotations(pPod)...)
-	if updatedAnnotations == nil {
-		updatedAnnotations = map[string]string{}
-	}
-	if updatedLabels == nil {
-		updatedLabels = map[string]string{}
-	}
-
-	// set owner references
-	updatedAnnotations[VClusterLabelsAnnotation] = LabelsAnnotation(vPod)
+	// update pod annotations
+	event.Host.Annotations[VClusterLabelsAnnotation] = LabelsAnnotation(vPod)
 	if len(vPod.OwnerReferences) > 0 {
 		ownerReferencesData, _ := json.Marshal(vPod.OwnerReferences)
-		updatedAnnotations[OwnerReferences] = string(ownerReferencesData)
+		event.Host.Annotations[OwnerReferences] = string(ownerReferencesData)
 		for _, ownerReference := range vPod.OwnerReferences {
 			if ownerReference.APIVersion == appsv1.SchemeGroupVersion.String() && canAnnotateOwnerSetKind(ownerReference.Kind) {
-				updatedAnnotations[OwnerSetKind] = ownerReference.Kind
+				event.Host.Annotations[OwnerSetKind] = ownerReference.Kind
 				break
 			}
 		}
 	} else {
-		delete(updatedAnnotations, OwnerReferences)
-		delete(updatedAnnotations, OwnerSetKind)
+		delete(event.Host.Annotations, OwnerReferences)
+		delete(event.Host.Annotations, OwnerSetKind)
 	}
 
-	if !equality.Semantic.DeepEqual(updatedAnnotations, pPod.Annotations) {
-		if updatedPod == nil {
-			updatedPod = pPod.DeepCopy()
-		}
-		updatedPod.Annotations = updatedAnnotations
-	}
-
-	// check pod and namespace labels
-	for k, v := range vNamespace.GetLabels() {
-		updatedLabels[translate.ConvertLabelKeyWithPrefix(NamespaceLabelPrefix, k)] = v
-	}
-	if !equality.Semantic.DeepEqual(updatedLabels, pPod.Labels) {
-		if updatedPod == nil {
-			updatedPod = pPod.DeepCopy()
-		}
-		updatedPod.Labels = updatedLabels
-	}
-
-	return updatedPod, nil
+	return nil
 }
 
-func getExcludedAnnotations(pPod *corev1.Pod) []string {
+func GetExcludedAnnotations(pPod *corev1.Pod) []string {
 	annotations := []string{ClusterAutoScalerAnnotation, OwnerReferences, OwnerSetKind, NamespaceAnnotation, NameAnnotation, UIDAnnotation, ServiceAccountNameAnnotation, HostsRewrittenAnnotation, VClusterLabelsAnnotation}
 	if pPod != nil {
 		for _, v := range pPod.Spec.Volumes {
@@ -83,7 +95,7 @@ func getExcludedAnnotations(pPod *corev1.Pod) []string {
 					if source.DownwardAPI != nil {
 						for _, item := range source.DownwardAPI.Items {
 							if item.FieldRef != nil {
-								// check if its a label we have to rewrite
+								// check if it's a label we have to rewrite
 								annotationsMatch := FieldPathAnnotationRegEx.FindStringSubmatch(item.FieldRef.FieldPath)
 								if len(annotationsMatch) == 2 {
 									if strings.HasPrefix(annotationsMatch[1], ServiceAccountTokenAnnotation) {
@@ -107,23 +119,14 @@ func getExcludedAnnotations(pPod *corev1.Pod) []string {
 // - spec.activeDeadlineSeconds
 //
 // TODO: check for ephemereal containers
-func (t *translator) calcSpecDiff(pObj, vObj *corev1.Pod) *corev1.PodSpec {
-	var updatedPodSpec *corev1.PodSpec
-
+func (t *translator) calcSpecDiff(pObj, vObj *corev1.Pod) {
 	// active deadlines different?
-	val, equal := isInt64Different(pObj.Spec.ActiveDeadlineSeconds, vObj.Spec.ActiveDeadlineSeconds)
-	if !equal {
-		updatedPodSpec = pObj.Spec.DeepCopy()
-		updatedPodSpec.ActiveDeadlineSeconds = val
-	}
+	pObj.Spec.ActiveDeadlineSeconds = vObj.Spec.ActiveDeadlineSeconds
 
 	// is image different?
 	updatedContainer := calcContainerImageDiff(pObj.Spec.Containers, vObj.Spec.Containers, t.imageTranslator, nil)
 	if len(updatedContainer) != 0 {
-		if updatedPodSpec == nil {
-			updatedPodSpec = pObj.Spec.DeepCopy()
-		}
-		updatedPodSpec.Containers = updatedContainer
+		pObj.Spec.Containers = updatedContainer
 	}
 
 	// we have to skip some init images that are injected by us to change the /etc/hosts file
@@ -136,21 +139,10 @@ func (t *translator) calcSpecDiff(pObj, vObj *corev1.Pod) *corev1.PodSpec {
 
 	updatedContainer = calcContainerImageDiff(pObj.Spec.InitContainers, vObj.Spec.InitContainers, t.imageTranslator, skipContainers)
 	if len(updatedContainer) != 0 {
-		if updatedPodSpec == nil {
-			updatedPodSpec = pObj.Spec.DeepCopy()
-		}
-		updatedPodSpec.InitContainers = updatedContainer
+		pObj.Spec.InitContainers = updatedContainer
 	}
 
-	isEqual := isPodSpecSchedulingGatesDiff(pObj.Spec.SchedulingGates, vObj.Spec.SchedulingGates)
-	if !isEqual {
-		if updatedPodSpec == nil {
-			updatedPodSpec = pObj.Spec.DeepCopy()
-		}
-		updatedPodSpec.SchedulingGates = vObj.Spec.SchedulingGates
-	}
-
-	return updatedPodSpec
+	pObj.Spec.SchedulingGates = vObj.Spec.SchedulingGates
 }
 
 func calcContainerImageDiff(pContainers, vContainers []corev1.Container, translateImages ImageTranslator, skipContainers map[string]bool) []corev1.Container {
@@ -184,29 +176,29 @@ func calcContainerImageDiff(pContainers, vContainers []corev1.Container, transla
 	return newContainers
 }
 
-func isInt64Different(i1, i2 *int64) (*int64, bool) {
-	if i1 == nil && i2 == nil {
-		return nil, true
-	} else if i1 != nil && i2 != nil {
-		return ptr.To(*i2), *i1 == *i2
+func stripInjectedSidecarContainers(vPod, pPod *corev1.Pod) {
+	vInitContainersMap := make(map[string]bool)
+	vContainersMap := make(map[string]bool)
+
+	for _, vInitContainer := range vPod.Spec.InitContainers {
+		vInitContainersMap[vInitContainer.Name] = true
 	}
 
-	var updated *int64
-	if i2 != nil {
-		updated = ptr.To(*i2)
+	for _, vContainer := range vPod.Spec.Containers {
+		vContainersMap[vContainer.Name] = true
 	}
 
-	return updated, false
-}
-
-func isPodSpecSchedulingGatesDiff(pGates, vGates []corev1.PodSchedulingGate) bool {
-	if len(vGates) != len(pGates) {
-		return false
-	}
-	for i, v := range vGates {
-		if v.Name != pGates[i].Name {
-			return false
+	vPod.Status.InitContainerStatuses = []corev1.ContainerStatus{}
+	for _, initContainerStatus := range pPod.Status.InitContainerStatuses {
+		if _, ok := vInitContainersMap[initContainerStatus.Name]; ok {
+			vPod.Status.InitContainerStatuses = append(vPod.Status.InitContainerStatuses, initContainerStatus)
 		}
 	}
-	return true
+
+	vPod.Status.ContainerStatuses = []corev1.ContainerStatus{}
+	for _, containerStatus := range pPod.Status.ContainerStatuses {
+		if _, ok := vContainersMap[containerStatus.Name]; ok {
+			vPod.Status.ContainerStatuses = append(vPod.Status.ContainerStatuses, containerStatus)
+		}
+	}
 }
