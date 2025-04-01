@@ -1,15 +1,22 @@
 package cli
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ghodss/yaml"
@@ -25,6 +32,8 @@ import (
 	"github.com/loft-sh/vcluster/pkg/embed"
 	"github.com/loft-sh/vcluster/pkg/helm"
 	"github.com/loft-sh/vcluster/pkg/platform"
+	"github.com/loft-sh/vcluster/pkg/snapshot"
+	"github.com/loft-sh/vcluster/pkg/snapshot/pod"
 	"github.com/loft-sh/vcluster/pkg/telemetry"
 	"github.com/loft-sh/vcluster/pkg/upgrade"
 	"github.com/loft-sh/vcluster/pkg/util"
@@ -33,6 +42,7 @@ import (
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/version"
@@ -63,6 +73,7 @@ type CreateOptions struct {
 	Add             bool
 	Expose          bool
 	ExposeLocal     bool
+	Restore         string
 	Connect         bool
 	Upgrade         bool
 
@@ -128,17 +139,19 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 	if err != nil {
 		return err
 	}
-	vclusters, err := find.ListVClusters(ctx, cmd.Context, "", cmd.Namespace, log)
+	vClusters, err := find.ListVClusters(ctx, cmd.Context, "", cmd.Namespace, log)
 	if err != nil {
 		return err
 	}
 
 	if !reuseNamespace {
-		for _, v := range vclusters {
+		for _, v := range vClusters {
 			if v.Namespace == cmd.Namespace && v.Name != vClusterName {
 				return fmt.Errorf("there is already a virtual cluster in namespace %s", cmd.Namespace)
 			}
 		}
+	} else {
+		cmd.log.Warn("Creation of multiple virtual clusters within the same namespace is deprecated and will be removed soon.")
 	}
 
 	err = cmd.prepare(ctx, vClusterName)
@@ -154,6 +167,13 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 	// check if vcluster already exists
 	if !cmd.Upgrade {
 		if isVClusterDeployed(release) {
+			if cmd.Restore != "" {
+				log.Infof("Restore vCluster %s...", vClusterName)
+				err = Restore(ctx, []string{vClusterName, cmd.Restore}, globalFlags, &snapshot.Options{}, &pod.Options{}, false, log)
+				if err != nil {
+					return fmt.Errorf("restore vCluster %s: %w", vClusterName, err)
+				}
+			}
 			if cmd.Connect {
 				return ConnectHelm(ctx, &ConnectOptions{
 					BackgroundProxy:       cmd.BackgroundProxy,
@@ -208,8 +228,10 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 			if err := currentVClusterConfig.UnmarshalYAMLStrict([]byte(migratedValues)); err != nil {
 				return err
 			}
-		} else {
-			if err := currentVClusterConfig.UnmarshalYAMLStrict([]byte(currentValues)); err != nil {
+		}
+
+		if len(cmd.Values) == 0 {
+			if err := confirmExperimental(currentVClusterConfig, currentValues, log); err != nil {
 				return err
 			}
 		}
@@ -218,6 +240,22 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 
 	// build extra values
 	var newExtraValues []string
+
+	// get config from snapshot
+	if len(cmd.Values) == 0 && len(cmd.SetValues) == 0 {
+		restoreValuesFile, err := cmd.getVClusterConfigFromSnapshot(ctx)
+		if err != nil {
+			log.Warnf("get vCluster config from snapshot: %w", err)
+		} else if restoreValuesFile != "" {
+			defer os.Remove(restoreValuesFile)
+			cmd.log.Info("Using vCluster config from snapshot")
+			newExtraValues = append(newExtraValues, restoreValuesFile)
+		}
+	} else if cmd.Restore != "" {
+		cmd.log.Warnf("Skipping config from snapshot because --values or --set flag is used")
+	}
+
+	// get config from values files
 	for _, value := range cmd.Values {
 		// ignore decoding errors and treat it as non-base64 string
 		decodedString, err := getBase64DecodedString(value)
@@ -226,25 +264,13 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 			continue
 		}
 
-		// write a temporary values file
-		tempFile, err := os.CreateTemp("", "")
-		tempValuesFile := tempFile.Name()
+		// write the decoded string to a temp file
+		tempValuesFile, err := writeTempFile([]byte(decodedString))
 		if err != nil {
-			return fmt.Errorf("create temp values file: %w", err)
+			return fmt.Errorf("write temp values file: %w", err)
 		}
-		defer func(name string) {
-			_ = os.Remove(name)
-		}(tempValuesFile)
+		defer os.Remove(tempValuesFile)
 
-		_, err = tempFile.Write([]byte(decodedString))
-		if err != nil {
-			return fmt.Errorf("write values to temp values file: %w", err)
-		}
-
-		err = tempFile.Close()
-		if err != nil {
-			return fmt.Errorf("close temp values file: %w", err)
-		}
 		// setting new file to extraValues slice to process it further.
 		newExtraValues = append(newExtraValues, tempValuesFile)
 	}
@@ -272,6 +298,12 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 	vClusterConfig, err := cmd.parseVClusterYAML(chartValues)
 	if err != nil {
 		return err
+	}
+
+	// multiple vCluster creation inside same ns should fail if `reuseNamespace` is not set as true in vCluster config
+	if reuseNamespace && !vClusterConfig.Experimental.ReuseNamespace {
+		return fmt.Errorf("there is already a virtual cluster in namespace %s; to create multiple virtual clusters "+
+			"within the same namespace, please set 'reuse-namespace' to true in vCluster config", cmd.Namespace)
 	}
 
 	if vClusterConfig.Experimental.IsolatedControlPlane.Headless {
@@ -338,6 +370,35 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 				"- Use `vcluster connect %s --namespace %s -- kubectl get ns` to run a command directly within the vcluster",
 			verb, vClusterName, cmd.Namespace, vClusterName, cmd.Namespace, vClusterName, cmd.Namespace,
 		)
+	}
+
+	return nil
+}
+
+func confirmExperimental(currentVClusterConfig *config.Config, currentValues string, log log.Logger) error {
+	if err := currentVClusterConfig.UnmarshalYAMLStrict([]byte(currentValues)); err != nil {
+		warning := config.ExperimentalWarning(log, []byte(currentValues))
+		if warning == "" {
+			warning = "The current configuration is not compatible with the version you're upgrading to."
+		}
+
+		log.Warn(warning)
+		if terminal.IsTerminalIn {
+			answer, qErr := log.Question(&survey.QuestionOptions{
+				Question:     "Formly experimental features that aren't manually migrated will be lost. Would you like to proceed?",
+				DefaultValue: "no",
+				Options:      []string{"no", "yes, I'll update my configuration later"},
+			})
+			if qErr != nil {
+				return qErr
+			}
+
+			if answer == "no" {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 
 	return nil
@@ -528,8 +589,53 @@ func (cmd *createHelm) deployChart(ctx context.Context, vClusterName, chartValue
 		cmd.log.Infof("Create vcluster %s...", vClusterName)
 	}
 
+	// if restore we deploy a resource quota to prevent other pods from starting
+	if cmd.Restore != "" {
+		// this is required or otherwise vCluster pods would start which we don't want when restoring
+		_, err = cmd.kubeClient.CoreV1().ResourceQuotas(cmd.Namespace).Create(ctx, &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      RestoreResourceQuota,
+				Namespace: cmd.Namespace,
+			},
+			Spec: corev1.ResourceQuotaSpec{
+				Hard: corev1.ResourceList{
+					corev1.ResourcePods: resource.MustParse("0"),
+				},
+			},
+		}, metav1.CreateOptions{})
+		if err != nil && !kerrors.IsAlreadyExists(err) {
+			return fmt.Errorf("unable to create vcluster restore resource quota: %w", err)
+		}
+
+		// create interrupt channel
+		sigint := make(chan os.Signal, 1)
+		defer func() {
+			// make sure we won't interfere with interrupts anymore
+			signal.Stop(sigint)
+
+			// delete the resource quota when we are done
+			_ = cmd.kubeClient.CoreV1().ResourceQuotas(cmd.Namespace).Delete(ctx, RestoreResourceQuota, metav1.DeleteOptions{})
+		}()
+
+		// also delete on interrupt
+		go func() {
+			// interrupt signal sent from terminal
+			signal.Notify(sigint, os.Interrupt)
+			// sigterm signal sent from kubernetes
+			signal.Notify(sigint, syscall.SIGTERM)
+
+			// wait until we get killed
+			<-sigint
+
+			// cleanup resource quota
+			_ = cmd.kubeClient.CoreV1().ResourceQuotas(cmd.Namespace).Delete(ctx, RestoreResourceQuota, metav1.DeleteOptions{})
+			os.Exit(1)
+		}()
+	}
+
 	// we have to upgrade / install the chart
-	err = helm.NewClient(&cmd.rawConfig, cmd.log, helmExecutablePath).Upgrade(ctx, vClusterName, cmd.Namespace, helm.UpgradeOptions{
+	helmClient := helm.NewClient(&cmd.rawConfig, cmd.log, helmExecutablePath)
+	err = helmClient.Upgrade(ctx, vClusterName, cmd.Namespace, helm.UpgradeOptions{
 		CreateNamespace: cmd.CreateNamespace,
 		Chart:           cmd.ChartName,
 		Repo:            cmd.ChartRepo,
@@ -542,6 +648,21 @@ func (cmd *createHelm) deployChart(ctx context.Context, vClusterName, chartValue
 	})
 	if err != nil {
 		return err
+	}
+
+	// now restore if wanted
+	if cmd.Restore != "" {
+		cmd.log.Infof("Restore vCluster %s...", vClusterName)
+		err = Restore(ctx, []string{vClusterName, cmd.Restore}, cmd.GlobalFlags, &snapshot.Options{}, &pod.Options{}, true, cmd.log)
+		if err != nil {
+			// delete the vcluster if the restore failed
+			deleteErr := helmClient.Delete(vClusterName, cmd.Namespace)
+			if deleteErr != nil {
+				cmd.log.Errorf("Failed to delete vcluster %s: %v", vClusterName, deleteErr)
+			}
+
+			return fmt.Errorf("restore vCluster %s: %w", vClusterName, err)
+		}
 	}
 
 	return nil
@@ -709,42 +830,101 @@ func (cmd *createHelm) createNamespace(ctx context.Context) error {
 }
 
 func (cmd *createHelm) getKubernetesVersion() (*version.Info, error) {
-	var (
-		kubernetesVersion *version.Info
-		err               error
-	)
-	if cmd.KubernetesVersion != "" {
-		if cmd.KubernetesVersion[0] != 'v' {
-			cmd.KubernetesVersion = "v" + cmd.KubernetesVersion
-		}
-
-		if !semver.IsValid(cmd.KubernetesVersion) {
-			return nil, fmt.Errorf("please use valid semantic versioning format, e.g. vX.X")
-		}
-
-		majorMinorVer := semver.MajorMinor(cmd.KubernetesVersion)
-
-		if splittedVersion := strings.Split(cmd.KubernetesVersion, "."); len(splittedVersion) > 2 {
-			cmd.log.Warnf("currently we only support major.minor version (%s) and not the patch version (%s)", majorMinorVer, cmd.KubernetesVersion)
-		}
-
-		parsedVersion, err := config.ParseKubernetesVersionInfo(majorMinorVer)
-		if err != nil {
-			return nil, err
-		}
-
-		kubernetesVersion = &version.Info{
-			Major: parsedVersion.Major,
-			Minor: parsedVersion.Minor,
-		}
-	}
-
-	if kubernetesVersion == nil {
-		kubernetesVersion, err = cmd.kubeClient.ServerVersion()
-		if err != nil {
-			return nil, err
-		}
+	kubernetesVersion, err := cmd.kubeClient.ServerVersion()
+	if err != nil {
+		return nil, err
 	}
 
 	return kubernetesVersion, nil
+}
+
+func writeTempFile(data []byte) (string, error) {
+	// write a temporary values file
+	tempFile, err := os.CreateTemp("", "")
+	tempValuesFile := tempFile.Name()
+	if err != nil {
+		return "", fmt.Errorf("create temp values file: %w", err)
+	}
+
+	_, err = tempFile.Write(data)
+	if err != nil {
+		_ = os.Remove(tempValuesFile)
+		return "", fmt.Errorf("write values to temp values file: %w", err)
+	}
+
+	err = tempFile.Close()
+	if err != nil {
+		_ = os.Remove(tempValuesFile)
+		return "", fmt.Errorf("close temp values file: %w", err)
+	}
+
+	return tempValuesFile, nil
+}
+
+func (cmd *createHelm) getVClusterConfigFromSnapshot(ctx context.Context) (string, error) {
+	if cmd.Restore == "" {
+		return "", nil
+	}
+
+	snapshotOptions := &snapshot.Options{}
+	err := snapshot.Parse(cmd.Restore, snapshotOptions)
+	if err != nil {
+		return "", fmt.Errorf("parse snapshot: %w", err)
+	}
+
+	objectStore, err := snapshot.CreateStore(ctx, snapshotOptions)
+	if err != nil {
+		return "", fmt.Errorf("create snapshot store: %w", err)
+	}
+
+	reader, err := objectStore.GetObject(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get snapshot object: %w", err)
+	}
+
+	// read the first tar entry
+	gzipReader, err := gzip.NewReader(reader)
+	if err != nil {
+		return "", fmt.Errorf("create gzip reader: %w", err)
+	}
+	defer gzipReader.Close()
+
+	// create a new tar reader
+	tarReader := tar.NewReader(gzipReader)
+
+	// read the vCluster config
+	header, err := tarReader.Next()
+	if err != nil {
+		return "", err
+	}
+
+	buf := &bytes.Buffer{}
+	_, err = io.Copy(buf, tarReader)
+	if err != nil {
+		return "", err
+	}
+
+	// no vCluster config in the snapshot
+	if header.Name != snapshot.SnapshotReleaseKey {
+		return "", nil
+	}
+
+	// unmarshal the release
+	release := &snapshot.HelmRelease{}
+	err = json.Unmarshal(buf.Bytes(), release)
+	if err != nil {
+		return "", fmt.Errorf("unmarshal vCluster release: %w", err)
+	}
+
+	// set chart version
+	if release.ChartVersion != "" && (cmd.ChartVersion == "" || cmd.ChartVersion == upgrade.GetVersion()) {
+		cmd.ChartVersion = release.ChartVersion
+	}
+
+	// write the values to a temp file
+	if len(release.Values) > 0 {
+		return writeTempFile(release.Values)
+	}
+
+	return "", nil
 }

@@ -110,7 +110,7 @@ type client struct {
 func (c *client) RefreshSelf(ctx context.Context) error {
 	managementClient, err := c.Management()
 	if err != nil {
-		return fmt.Errorf("create mangement client: %w", err)
+		return fmt.Errorf("create management client: %w", err)
 	}
 
 	c.self, err = managementClient.Loft().ManagementV1().Selves().Create(ctx, &managementv1.Self{}, metav1.CreateOptions{})
@@ -155,6 +155,10 @@ func (c *client) Logout(ctx context.Context) error {
 
 func (c *client) Save() error {
 	return c.config.Save()
+}
+
+func (c *client) Delete() error {
+	return c.config.Delete()
 }
 
 func (c *client) ManagementConfig() (*rest.Config, error) {
@@ -228,7 +232,7 @@ func (c *client) Config() *config.CLI {
 
 func verifyHost(host string) error {
 	if !strings.HasPrefix(host, "https") {
-		return fmt.Errorf("cannot log into a non https loft instance '%s', please make sure you have TLS enabled", host)
+		return fmt.Errorf(product.Replace("cannot log into a non https loft instance '%s', please make sure you have TLS enabled"), host)
 	}
 
 	return nil
@@ -343,7 +347,7 @@ func (c *client) LoginWithAccessKey(host, accessKey string, insecure bool) error
 		if errors.As(err, &urlError) && urlError != nil {
 			var err x509.UnknownAuthorityError
 			if errors.As(urlError.Err, &err) {
-				return fmt.Errorf("unsafe login endpoint '%s', if you wish to login into an insecure loft endpoint run with the '--insecure' flag", c.config.Platform.Host)
+				return fmt.Errorf(product.Replace("cannot log into a non https loft instance '%s', please make sure you have TLS enabled"), host)
 			}
 		}
 

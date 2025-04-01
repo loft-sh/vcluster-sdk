@@ -88,6 +88,11 @@ func ConnectHelm(ctx context.Context, options *ConnectOptions, globalFlags *flag
 }
 
 func (cmd *connectHelm) connect(ctx context.Context, vCluster *find.VCluster, command []string) error {
+	if connected, _ := checkIfAlreadyConnected(ctx, vCluster); connected {
+		cmd.Log.Infof("already connected to vcluster %q", vCluster.Name)
+		return nil
+	}
+
 	// prepare clients and find vcluster
 	err := cmd.prepare(ctx, vCluster)
 	if err != nil {
@@ -98,6 +103,14 @@ func (cmd *connectHelm) connect(ctx context.Context, vCluster *find.VCluster, co
 	kubeConfig, err := cmd.getVClusterKubeConfig(ctx, vCluster.Name, command)
 	if err != nil {
 		return err
+	}
+
+	if !cmd.ConnectOptions.Print {
+		// check if vcluster is ready
+		err = cmd.waitForVCluster(ctx, *kubeConfig, cmd.errorChan)
+		if err != nil {
+			return fmt.Errorf("failed connecting to vcluster, verify connection arguments: %w ", err)
+		}
 	}
 
 	// check if we should execute command
@@ -261,7 +274,7 @@ func (cmd *connectHelm) prepare(ctx context.Context, vCluster *find.VCluster) er
 	// resume vCluster if necessary
 	if vCluster.Status == find.StatusPaused {
 		cmd.Log.Infof("Resume vcluster %s...", vCluster.Name)
-		err = lifecycle.ResumeVCluster(ctx, cmd.kubeClient, vCluster.Name, cmd.Namespace, cmd.Log)
+		err = lifecycle.ResumeVCluster(ctx, cmd.kubeClient, vCluster.Name, cmd.Namespace, false, cmd.Log)
 		if err != nil {
 			return fmt.Errorf("resume vcluster: %w", err)
 		}
@@ -337,7 +350,7 @@ func (cmd *connectHelm) getVClusterKubeConfig(ctx context.Context, vclusterName 
 		if cmd.Server == "" && cmd.BackgroundProxy {
 			if localkubernetes.IsDockerInstalledAndUpAndRunning() {
 				// start background container
-				cmd.Server, err = localkubernetes.CreateBackgroundProxyContainer(ctx, vclusterName, cmd.Namespace, cmd.kubeClientConfig, kubeConfig, cmd.LocalPort, cmd.Log)
+				cmd.Server, err = localkubernetes.CreateBackgroundProxyContainer(ctx, vclusterName, cmd.Namespace, cmd.kubeClientConfig, cmd.LocalPort, cmd.Log)
 				if err != nil {
 					cmd.Log.Warnf("Error exposing local vcluster, will fallback to port-forwarding: %v", err)
 					cmd.BackgroundProxy = false
@@ -645,12 +658,14 @@ func getLocalVClusterConfig(vKubeConfig clientcmdapi.Config, options *ConnectOpt
 	vKubeConfig = *vKubeConfig.DeepCopy()
 
 	// update vCluster server address in case of OSS vClusters only
-	if options.LocalPort != 0 {
-		for _, cluster := range vKubeConfig.Clusters {
-			if cluster == nil {
-				continue
+	if options.Server == "" {
+		if options.LocalPort != 0 {
+			for _, cluster := range vKubeConfig.Clusters {
+				if cluster == nil {
+					continue
+				}
+				cluster.Server = "https://localhost:" + strconv.Itoa(options.LocalPort)
 			}
-			cluster.Server = "https://localhost:" + strconv.Itoa(options.LocalPort)
 		}
 	}
 
@@ -684,6 +699,9 @@ func (cmd *connectHelm) waitForVCluster(ctx context.Context, vKubeConfig clientc
 		default:
 			// check if service account exists
 			_, err = vKubeClient.CoreV1().ServiceAccounts("default").Get(ctx, "default", metav1.GetOptions{})
+			if err != nil {
+				cmd.Log.Debugf("failed to list default service account %v", err)
+			}
 			return err == nil, nil
 		}
 	})
@@ -692,4 +710,33 @@ func (cmd *connectHelm) waitForVCluster(ctx context.Context, vKubeConfig clientc
 	}
 
 	return nil
+}
+
+func checkIfAlreadyConnected(ctx context.Context, vCluster *find.VCluster) (bool, error) {
+	currentContext, _, err := find.CurrentContext()
+	if err != nil {
+		return false, err
+	}
+	if currentContext == find.VClusterContextName(vCluster.Name, vCluster.Namespace, vCluster.Context) {
+		kubeConfig, err := vCluster.ClientFactory.ClientConfig()
+		if err != nil {
+			return false, err
+		}
+
+		vKubeClient, err := kubernetes.NewForConfig(kubeConfig)
+		if err != nil {
+			return false, err
+		}
+
+		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		// Use the timeout context in the Get call
+		_, err = vKubeClient.CoreV1().ServiceAccounts("default").Get(timeoutCtx, "default", metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
 }

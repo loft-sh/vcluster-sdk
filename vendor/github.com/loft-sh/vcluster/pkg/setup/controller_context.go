@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	vclusterconfig "github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/nodes"
 	"github.com/loft-sh/vcluster/pkg/etcd"
@@ -115,19 +116,26 @@ func getLocalCacheOptions(options *config.VirtualClusterConfig) cache.Options {
 	// do we need access to another namespace to export the kubeconfig ?
 	// we will need access to all the objects that the vcluster usually has access to
 	// otherwise the controller will not start
-	if options.ExportKubeConfig.Secret.Namespace != "" {
-		defaultNamespaces[options.ExportKubeConfig.Secret.Namespace] = cache.Config{}
+	for _, secret := range options.ExportKubeConfig.GetAdditionalSecrets() {
+		if secret.Namespace != "" {
+			defaultNamespaces[secret.Namespace] = cache.Config{}
+		}
 	}
 
 	if len(defaultNamespaces) == 0 {
 		return cache.Options{DefaultNamespaces: nil}
 	}
+
 	return cache.Options{DefaultNamespaces: defaultNamespaces}
 }
 
 func startPlugins(ctx context.Context, virtualConfig *rest.Config, virtualRawConfig *clientcmdapi.Config, options *config.VirtualClusterConfig) error {
 	klog.Infof("Start Plugins Manager...")
-	syncerConfig, err := CreateVClusterKubeConfig(virtualRawConfig, options)
+	createKubeConfigOptions := CreateKubeConfigOptions{
+		ControlPlaneProxy: options.ControlPlane.Proxy,
+		ExportKubeConfig:  options.ExportKubeConfig.ExportKubeConfigProperties,
+	}
+	syncerConfig, err := CreateVClusterKubeConfig(virtualRawConfig, createKubeConfigOptions)
 	if err != nil {
 		return err
 	}
@@ -220,7 +228,16 @@ func waitForClientConfig(ctx context.Context, options *config.VirtualClusterConf
 	return clientConfig, nil
 }
 
-func CreateVClusterKubeConfig(config *clientcmdapi.Config, options *config.VirtualClusterConfig) (*clientcmdapi.Config, error) {
+// CreateKubeConfigOptions defines all config options that are available when creating a virtual cluster config.
+type CreateKubeConfigOptions struct {
+	// ControlPlaneProxy specifies the proxy settings for the virtual cluster control plane.
+	ControlPlaneProxy vclusterconfig.ControlPlaneProxy
+
+	// ExportKubeConfig specifies kubeconfig values that override the default kubeconfig.
+	ExportKubeConfig vclusterconfig.ExportKubeConfigProperties
+}
+
+func CreateVClusterKubeConfig(config *clientcmdapi.Config, options CreateKubeConfigOptions) (*clientcmdapi.Config, error) {
 	config = config.DeepCopy()
 
 	// exchange kube config server & resolve certificate
@@ -240,7 +257,7 @@ func CreateVClusterKubeConfig(config *clientcmdapi.Config, options *config.Virtu
 			cluster.CertificateAuthorityData = o
 		}
 
-		cluster.Server = fmt.Sprintf("https://localhost:%d", options.ControlPlane.Proxy.Port)
+		cluster.Server = fmt.Sprintf("https://localhost:%d", options.ControlPlaneProxy.Port)
 	}
 
 	// resolve auth info cert & key
@@ -369,8 +386,9 @@ func initControllerContext(
 	}
 
 	controllerContext := &synccontext.ControllerContext{
-		Context:               ctx,
-		LocalManager:          localManager,
+		Context:      ctx,
+		LocalManager: localManager,
+
 		VirtualManager:        virtualManager,
 		VirtualRawConfig:      virtualRawConfig,
 		VirtualClusterVersion: virtualClusterVersion,
