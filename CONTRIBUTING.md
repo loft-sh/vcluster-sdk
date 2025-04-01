@@ -21,3 +21,9 @@ This project is licensed under the Apache 2.0 License.
 ## Copyright notice
 
 It is important to state that you retain copyright for your contributions, but agree to license them for usage by the project and author(s) under the Apache 2.0 license. Git retains history of authorship, but we use a catch-all statement rather than individual names.
+
+## Upgrade vCluster dependency
+
+There is automated CI job to bump vCluster dependency & vCluster CLI version in E2E jobs.
+In this repository, navigate to Actions -> Select "Update vCluster dep"  job and pass target vCluster version (e.g. `v0.25.0`) as an input.
+CI job will generate a Pull Request in this repository. Make sure that e2e tests pass on this PR (there may be cases when additional, manual changes are needed) and once it's all green, you can merge this PR.
