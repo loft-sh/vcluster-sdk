@@ -1,4 +1,5 @@
 name: Update vCluster dep
+run-name: ${{ github.actor }} is upgrading vcluster dependencies
 on:
   workflow_dispatch:
     inputs:
@@ -6,6 +7,7 @@ on:
         description: 'Release tag in form vX.Y.Z'
         required: true
         type: string
+        default: v0.25.0
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -53,5 +55,5 @@ jobs:
           # create a PR in vcluster-sdk
           git commit -m "chore: bump vCluster dependency to ${RELEASE_TAG}"
           git push -u origin -f ${branch_name}
-          gh pr create --fill --head ${branch_name}
+          gh pr create --head ${branch_name} --title "chore: bump vCluster dependency to ${RELEASE_TAG}" --body "This PR updates the vCluster dependency to version ${RELEASE_TAG}."
           echo "Create PR in vcluster-sdk"

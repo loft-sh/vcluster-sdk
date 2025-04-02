@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"log"
 	"os"
 	"os/exec"
@@ -19,15 +20,19 @@ func main() {
 	if !strings.HasPrefix(version, "v") {
 		log.Fatal("please pass target update version (vX.Y.Z, e.g. v0.24.0) with 'v' prefix")
 	}
-	workflowBytes, err := os.ReadFile(workflowRelativePath)
+	workflowFile, err := os.Open(workflowRelativePath)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer workflowFile.Close()
+
+	scanner := bufio.NewScanner(workflowFile)
 	var output string
 
-	for _, line := range strings.Split(string(workflowBytes), "\n") {
+	for scanner.Scan() {
+		line := scanner.Text()
 		if strings.Contains(line, "  VCLUSTER_VERSION:") {
-			replacedLine := "  VCLUSTER_VERSION: v" + version + "\n"
+			replacedLine := "  VCLUSTER_VERSION: " + version + "\n"
 			log.Printf("replacing line: \n%s\n with: \n%s\n", line, replacedLine)
 			output = output + replacedLine
 		} else {
@@ -37,7 +42,7 @@ func main() {
 	if err := os.WriteFile(workflowRelativePath, []byte(output), 0644); err != nil {
 		log.Fatal(err)
 	}
-	cmd := exec.Command("go", "get", "github.com/loft-sh/vcluster@v"+version)
+	cmd := exec.Command("go", "get", "github.com/loft-sh/vcluster@"+version)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
