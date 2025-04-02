@@ -16,13 +16,15 @@ func (s *persistentVolumeSyncer) translate(ctx *synccontext.SyncContext, vPv *co
 	pPV.Spec.ClaimRef = nil
 
 	// TODO: translate the storage secrets
-	pPV.Spec.StorageClassName = mappings.VirtualToHostName(ctx, vPv.Spec.StorageClassName, "", mappings.StorageClasses())
+	if pPV.Spec.StorageClassName != "" {
+		pPV.Spec.StorageClassName = translate.Default.HostNameCluster(vPv.Spec.StorageClassName)
+	}
 	return pPV, nil
 }
 
 func (s *persistentVolumeSyncer) translateBackwards(pPv *corev1.PersistentVolume, vPvc *corev1.PersistentVolumeClaim) *corev1.PersistentVolume {
 	// build virtual persistent volume
-	vObj := translate.CopyObjectWithName(pPv, types.NamespacedName{Name: pPv.Name}, false)
+	vObj := translate.CopyObjectWithName(pPv, types.NamespacedName{Name: pPv.Name}, false, s.excludedAnnotations...)
 	if vPvc != nil {
 		if vObj.Spec.ClaimRef == nil {
 			vObj.Spec.ClaimRef = &corev1.ObjectReference{}

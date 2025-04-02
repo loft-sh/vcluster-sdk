@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/debug"
 	"github.com/loft-sh/vcluster/pkg/platform/defaults"
 	"github.com/mitchellh/go-homedir"
 
@@ -122,7 +123,10 @@ func BuildRoot(log log.Logger) (*cobra.Command, *flags.GlobalFlags, error) {
 	rootCmd.AddCommand(NewResumeCmd(globalFlags))
 	rootCmd.AddCommand(NewDisconnectCmd(globalFlags))
 	rootCmd.AddCommand(NewUpgradeCmd())
+	rootCmd.AddCommand(NewSnapshot(globalFlags))
+	rootCmd.AddCommand(NewRestore(globalFlags))
 	rootCmd.AddCommand(use.NewUseCmd(globalFlags))
+	rootCmd.AddCommand(debug.NewDebugCommand(globalFlags))
 	rootCmd.AddCommand(convert.NewConvertCmd(globalFlags))
 	rootCmd.AddCommand(cmdtelemetry.NewTelemetryCmd(globalFlags))
 	rootCmd.AddCommand(versionCmd)

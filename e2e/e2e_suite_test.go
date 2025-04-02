@@ -28,7 +28,7 @@ func TestRunE2ETests(t *testing.T) {
 	_ = examplev1.AddToScheme(scheme.Scheme)
 
 	gomega.RegisterFailHandler(ginkgo.Fail)
-	err := framework.CreateFramework(context.Background(), scheme.Scheme)
+	err := framework.CreateFramework(context.Background())
 	if err != nil {
 		log.GetInstance().Fatalf("Error setting up framework: %v", err)
 	}

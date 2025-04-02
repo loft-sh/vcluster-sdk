@@ -2,11 +2,14 @@ package config
 
 import (
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/invopop/jsonschema"
 	"sigs.k8s.io/yaml"
@@ -74,6 +77,9 @@ type Config struct {
 
 	// Plugin specifies which vCluster plugins to enable. Use "plugins" instead. Do not use this option anymore.
 	Plugin map[string]Plugin `json:"plugin,omitempty"`
+
+	// SleepMode holds the native sleep mode configuration for Pro clusters
+	SleepMode *SleepMode `json:"sleepMode,omitempty"`
 }
 
 // Integrations holds config for vCluster integrations with other operators or tools running on the host cluster
@@ -86,6 +92,43 @@ type Integrations struct {
 
 	// ExternalSecrets reuses a host external secret operator and makes certain CRDs from it available inside the vCluster
 	ExternalSecrets ExternalSecrets `json:"externalSecrets,omitempty"`
+
+	// CertManager reuses a host cert-manager and makes its CRDs from it available inside the vCluster.
+	// - Certificates and Issuers will be synced from the virtual cluster to the host cluster.
+	// - ClusterIssuers will be synced from the host cluster to the virtual cluster.
+	CertManager CertManager `json:"certManager,omitempty"`
+}
+
+// CertManager reuses a host cert-manager and makes its CRDs from it available inside the vCluster
+type CertManager struct {
+	EnableSwitch
+
+	// Sync contains advanced configuration for syncing cert-manager resources.
+	Sync CertManagerSync `json:"sync,omitempty"`
+}
+
+type CertManagerSync struct {
+	ToHost   CertManagerSyncToHost   `json:"toHost,omitempty"`
+	FromHost CertManagerSyncFromHost `json:"fromHost,omitempty"`
+}
+
+type CertManagerSyncToHost struct {
+	// Certificates defines if certificates should get synced from the virtual cluster to the host cluster.
+	Certificates EnableSwitch `json:"certificates,omitempty"`
+
+	// Issuers defines if issuers should get synced from the virtual cluster to the host cluster.
+	Issuers EnableSwitch `json:"issuers,omitempty"`
+}
+
+type CertManagerSyncFromHost struct {
+	// ClusterIssuers defines if (and which) cluster issuers should get synced from the host cluster to the virtual cluster.
+	ClusterIssuers ClusterIssuersSyncConfig `json:"clusterIssuers,omitempty"`
+}
+
+type ClusterIssuersSyncConfig struct {
+	EnableSwitch
+	// Selector defines what cluster issuers should be imported.
+	Selector LabelSelector `json:"selector,omitempty"`
 }
 
 // ExternalSecrets reuses a host external secret operator and makes certain CRDs from it available inside the vCluster
@@ -294,6 +337,10 @@ func ValidateStoreAndDistroChanges(currentStoreType, previousStoreType StoreType
 }
 
 func (c *Config) IsProFeatureEnabled() bool {
+	if os.Getenv("SKIP_VALIDATE_PRO_FEATURES") == "true" {
+		return false
+	}
+
 	if len(c.Networking.ResolveDNS) > 0 {
 		return true
 	}
@@ -356,6 +403,41 @@ func UnmarshalYAMLStrict(data []byte, i any) error {
 
 // ExportKubeConfig describes how vCluster should export the vCluster kubeconfig.
 type ExportKubeConfig struct {
+	ExportKubeConfigProperties
+
+	// Declare in which host cluster secret vCluster should store the generated virtual cluster kubeconfig.
+	// If this is not defined, vCluster will create it with `vc-NAME`. If you specify another name,
+	// vCluster creates the config in this other secret.
+	//
+	// Deprecated: Use AdditionalSecrets instead.
+	Secret ExportKubeConfigSecretReference `json:"secret,omitempty"`
+
+	// AdditionalSecrets specifies the additional host cluster secrets in which vCluster will store the
+	// generated virtual cluster kubeconfigs.
+	AdditionalSecrets []ExportKubeConfigAdditionalSecretReference `json:"additionalSecrets,omitempty"`
+}
+
+// GetAdditionalSecrets returns optional additional kubeconfig Secrets.
+//
+// If the deprecated Secret property is set, GetAdditionalSecrets only returns that secret, and
+// AdditionalSecrets is ignored. On the other hand, if the AdditionalSecrets property is set,
+// GetAdditionalSecrets returns the secrets config from the AdditionalSecrets, and Secret property
+// is ignored.
+func (e *ExportKubeConfig) GetAdditionalSecrets() []ExportKubeConfigAdditionalSecretReference {
+	if e.Secret.IsSet() {
+		return []ExportKubeConfigAdditionalSecretReference{
+			{
+				ExportKubeConfigProperties: e.ExportKubeConfigProperties,
+				Namespace:                  e.Secret.Namespace,
+				Name:                       e.Secret.Name,
+			},
+		}
+	}
+
+	return e.AdditionalSecrets
+}
+
+type ExportKubeConfigProperties struct {
 	// Context is the name of the context within the generated kubeconfig to use.
 	Context string `json:"context,omitempty"`
 
@@ -367,11 +449,6 @@ type ExportKubeConfig struct {
 
 	// ServiceAccount can be used to generate a service account token instead of the default certificates.
 	ServiceAccount ExportKubeConfigServiceAccount `json:"serviceAccount,omitempty"`
-
-	// Declare in which host cluster secret vCluster should store the generated virtual cluster kubeconfig.
-	// If this is not defined, vCluster will create it with `vc-NAME`. If you specify another name,
-	// vCluster creates the config in this other secret.
-	Secret ExportKubeConfigSecretReference `json:"secret,omitempty"`
 }
 
 type ExportKubeConfigServiceAccount struct {
@@ -394,6 +471,24 @@ type ExportKubeConfigSecretReference struct {
 	Name string `json:"name,omitempty"`
 
 	// Namespace where vCluster should store the kubeconfig secret. If this is not equal to the namespace
+	// where you deployed vCluster, you need to make sure vCluster has access to this other namespace.
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// IsSet checks if at least one ExportKubeConfigSecretReference property is set.
+func (s *ExportKubeConfigSecretReference) IsSet() bool {
+	return *s != (ExportKubeConfigSecretReference{})
+}
+
+// ExportKubeConfigAdditionalSecretReference defines the additional host cluster secret in which
+// vCluster stores the generated virtual cluster kubeconfigs.
+type ExportKubeConfigAdditionalSecretReference struct {
+	ExportKubeConfigProperties
+
+	// Name is the name of the secret where the kubeconfig is stored.
+	Name string `json:"name,omitempty"`
+
+	// Namespace where vCluster stores the kubeconfig secret. If this is not equal to the namespace
 	// where you deployed vCluster, you need to make sure vCluster has access to this other namespace.
 	Namespace string `json:"namespace,omitempty"`
 }
@@ -465,6 +560,38 @@ type EnableSwitchWithPatches struct {
 	Patches []TranslatePatch `json:"patches,omitempty"`
 }
 
+type EnableSwitchWithResourcesMappings struct {
+	// Enabled defines if this option should be enabled.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Patches patch the resource according to the provided specification.
+	Patches []TranslatePatch `json:"patches,omitempty"`
+
+	// Mappings for Namespace and Object
+	Mappings FromHostMappings `json:"mappings,omitempty"`
+}
+
+type FromHostMappings struct {
+	// ByName is a map of host-object-namespace/host-object-name: virtual-object-namespace/virtual-object-name.
+	// There are several wildcards supported:
+	// 1. To match all objects in host namespace and sync them to different namespace in vCluster:
+	// byName:
+	//   "foo/*": "foo-in-virtual/*"
+	// 2. To match specific object in the host namespace and sync it to the same namespace with the same name:
+	// byName:
+	//   "foo/my-object": "foo/my-object"
+	// 3. To match specific object in the host namespace and sync it to the same namespace with different name:
+	// byName:
+	//   "foo/my-object": "foo/my-virtual-object"
+	// 4. To match all objects in the vCluster host namespace and sync them to a different namespace in vCluster:
+	// byName:
+	//   "": "my-virtual-namespace/*"
+	// 5. To match specific objects in the vCluster host namespace and sync them to a different namespace in vCluster:
+	// byName:
+	//   "/my-object": "my-virtual-namespace/my-object"
+	ByName map[string]string `json:"byName,omitempty"`
+}
+
 type SyncFromHost struct {
 	// Nodes defines if nodes should get synced from the host cluster to the virtual cluster, but not back.
 	Nodes SyncNodes `json:"nodes,omitempty"`
@@ -498,6 +625,12 @@ type SyncFromHost struct {
 
 	// VolumeSnapshotClasses defines if volume snapshot classes created within the virtual cluster should get synced to the host cluster.
 	VolumeSnapshotClasses EnableSwitchWithPatches `json:"volumeSnapshotClasses,omitempty"`
+
+	// ConfigMaps defines if config maps in the host should get synced to the virtual cluster.
+	ConfigMaps EnableSwitchWithResourcesMappings `json:"configMaps,omitempty"`
+
+	// Secrets defines if secrets in the host should get synced to the virtual cluster.
+	Secrets EnableSwitchWithResourcesMappings `json:"secrets,omitempty"`
 }
 
 type SyncToHostCustomResource struct {
@@ -569,6 +702,9 @@ type SyncFromHostCustomResource struct {
 
 	// Patches patch the resource according to the provided specification.
 	Patches []TranslatePatch `json:"patches,omitempty"`
+
+	// Mappings for Namespace and Object
+	Mappings FromHostMappings `json:"mappings,omitempty"`
 }
 
 type EnableAutoSwitch struct {
@@ -614,6 +750,12 @@ type SyncPods struct {
 	// UseSecretsForSATokens will use secrets to save the generated service account tokens by virtual cluster instead of using a
 	// pod annotation.
 	UseSecretsForSATokens bool `json:"useSecretsForSATokens,omitempty"`
+
+	// RuntimeClassName is the runtime class to set for synced pods.
+	RuntimeClassName string `json:"runtimeClassName,omitempty"`
+
+	// PriorityClassName is the priority class to set for synced pods.
+	PriorityClassName string `json:"priorityClassName,omitempty"`
 
 	// RewriteHosts is a special option needed to rewrite statefulset containers to allow the correct FQDN. virtual cluster will add
 	// a small container to each stateful set pod that will initially rewrite the /etc/hosts file to match the FQDN expected by
@@ -965,8 +1107,8 @@ type DistroK8s struct {
 	// controlPlane.distro.k8s.scheduler.image.tag
 	//(or controlPlane.distro.k8s.controllerManager.image.tag or controlPlane.distro.k8s.apiServer.image.tag)
 	// is set to v1.31.0,
-	// value from controlPlane.distro.k8s.<controlPlane-component>.image.tag will be used
-	// (where <controlPlane-component is apiServer, controllerManager and scheduler).
+	// value from controlPlane.distro.k8s.(controlPlane-component).image.tag will be used
+	// (where controlPlane-component is apiServer, controllerManager and scheduler).
 	Version string `json:"version,omitempty"`
 
 	// APIServer holds configuration specific to starting the api server.
@@ -1175,9 +1317,6 @@ type EtcdDeployService struct {
 }
 
 type EtcdDeployHeadlessService struct {
-	// Enabled defines if the etcd headless service should be deployed
-	Enabled bool `json:"enabled,omitempty"`
-
 	// Annotations are extra annotations for the external etcd headless service
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
@@ -1616,21 +1755,6 @@ type ResourceQuota struct {
 	LabelsAndAnnotations `json:",inline"`
 }
 
-type LabelSelectorRequirement struct {
-	// key is the label key that the selector applies to.
-	Key string `json:"key"`
-
-	// operator represents a key's relationship to a set of values.
-	// Valid operators are In, NotIn, Exists and DoesNotExist.
-	Operator string `json:"operator"`
-
-	// values is an array of string values. If the operator is In or NotIn,
-	// the values array must be non-empty. If the operator is Exists or DoesNotExist,
-	// the values array must be empty. This array is replaced during a strategic
-	// merge patch.
-	Values []string `json:"values,omitempty"`
-}
-
 type LimitRange struct {
 	// Enabled defines if the limit range should be deployed by vCluster. "auto" means that if resourceQuota is enabled,
 	// the limitRange will be enabled as well.
@@ -1879,7 +2003,7 @@ type Telemetry struct {
 }
 
 type Experimental struct {
-	// Deploy allows you to configure manifests and Helm charts to deploy within the virtual cluster.
+	// Deploy allows you to configure manifests and Helm charts to deploy within the host or virtual cluster.
 	Deploy ExperimentalDeploy `json:"deploy,omitempty"`
 
 	// SyncSettings are advanced settings for the syncer controller.
@@ -1899,6 +2023,10 @@ type Experimental struct {
 
 	// DenyProxyRequests denies certain requests in the vCluster proxy.
 	DenyProxyRequests []DenyRule `json:"denyProxyRequests,omitempty" product:"pro"`
+
+	// ReuseNamespace allows reusing the same namespace to create multiple vClusters.
+	// This flag is deprecated, as this scenario will be removed entirely in upcoming releases.
+	ReuseNamespace bool `json:"reuseNamespace,omitempty"`
 }
 
 func (e Experimental) JSONSchemaExtend(base *jsonschema.Schema) {
@@ -1963,10 +2091,10 @@ type ExperimentalDeploy struct {
 }
 
 type ExperimentalDeployHost struct {
-	// Manifests are raw Kubernetes manifests that should get applied within the virtual cluster.
+	// Manifests are raw Kubernetes manifests that should get applied within the host cluster.
 	Manifests string `json:"manifests,omitempty"`
 
-	// ManifestsTemplate is a Kubernetes manifest template that will be rendered with vCluster values before applying it within the virtual cluster.
+	// ManifestsTemplate is a Kubernetes manifest template that will be rendered with vCluster values before applying it within the host cluster.
 	ManifestsTemplate string `json:"manifestsTemplate,omitempty"`
 }
 
@@ -2314,4 +2442,71 @@ func addProToJSONSchema(base *jsonschema.Schema, t reflect.Type) {
 		}
 		central.Extras["pro"] = true
 	}
+}
+
+// SleepMode holds configuration for native/workload only sleep mode
+type SleepMode struct {
+	// Enabled toggles the sleep mode functionality, allowing for disabling sleep mode without removing other config
+	Enabled bool `json:"enabled,omitempty"`
+	// Timezone represents the timezone a sleep schedule should run against, defaulting to UTC if unset
+	TimeZone string `json:"timeZone,omitempty"`
+	// AutoSleep holds autoSleep details
+	AutoSleep SleepModeAutoSleep `json:"autoSleep,omitempty"`
+	// AutoWakeup holds configuration for waking the vCluster on a schedule rather than waiting for some activity.
+	AutoWakeup AutoWakeup `json:"autoWakeup,omitempty"`
+}
+
+// SleepModeAutoSleep holds configuration for allowing a vCluster to sleep its workloads
+// automatically
+type SleepModeAutoSleep struct {
+	// AfterInactivity represents how long a vCluster can be idle before workloads are automaticaly put to sleep
+	AfterInactivity Duration `json:"afterInactivity,omitempty"`
+
+	// Schedule represents a cron schedule for when to sleep workloads
+	Schedule string `json:"schedule,omitempty"`
+
+	// Exclude holds configuration for labels that, if present, will prevent a workload from going to sleep
+	Exclude AutoSleepExclusion `json:"exclude,omitempty"`
+}
+
+// Duration allows for automatic Marshalling from strings like "1m" to a time.Duration
+type Duration string
+
+// MarshalJSON implements Marshaler
+func (d Duration) MarshalJSON() ([]byte, error) {
+	dur, err := time.ParseDuration(string(d))
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(dur.String())
+}
+
+// UnmarshalJSON implements Marshaler
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var v interface{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+
+	sval, ok := v.(string)
+	if !ok {
+		return errors.New("invalid duration")
+	}
+
+	_, err := time.ParseDuration(sval)
+	if err != nil {
+		return err
+	}
+	*d = Duration(sval)
+	return nil
+}
+
+// AutoWakeup holds the cron schedule to wake workloads automatically
+type AutoWakeup struct {
+	Schedule string `json:"schedule,omitempty"`
+}
+
+// AutoSleepExclusion holds conifiguration for excluding workloads from sleeping by label(s)
+type AutoSleepExclusion struct {
+	Selector LabelSelector `json:"selector,omitempty"`
 }

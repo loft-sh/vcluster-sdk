@@ -93,9 +93,9 @@ func (s *serviceSyncer) Sync(ctx *synccontext.SyncContext, event *synccontext.Sy
 
 	// check if recreating service is necessary
 	if event.Virtual.Spec.ClusterIP != event.Host.Spec.ClusterIP {
+		ctx.Log.Infof("recreating virtual service %s/%s, because cluster ip differs %s != %s", event.Virtual.Namespace, event.Virtual.Name, event.Host.Spec.ClusterIP, event.Virtual.Spec.ClusterIP)
 		event.Virtual.Spec.ClusterIPs = nil
 		event.Virtual.Spec.ClusterIP = event.Host.Spec.ClusterIP
-		ctx.Log.Infof("recreating virtual service %s/%s, because cluster ip differs %s != %s", event.Virtual.Namespace, event.Virtual.Name, event.Host.Spec.ClusterIP, event.Virtual.Spec.ClusterIP)
 
 		// recreate the new service with the correct cluster ip
 		err := recreateService(ctx, ctx.VirtualClient, event.Virtual)
@@ -198,13 +198,12 @@ func (s *serviceSyncer) Sync(ctx *synccontext.SyncContext, event *synccontext.Sy
 	event.Virtual.Labels, event.Host.Labels = translate.LabelsBidirectionalUpdate(event)
 
 	// remove the ServiceBlockDeletion annotation if it's not needed
-	if event.Virtual.Spec.ClusterIP == event.Host.Spec.ClusterIP {
-		delete(event.Host.Annotations, ServiceBlockDeletion)
-	}
+	delete(event.Host.Annotations, ServiceBlockDeletion)
 
-	// translate selector
-	// TODO: ryan - convert to bidirectional
-	if !apiequality.Semantic.DeepEqual(event.VirtualOld.Spec.Selector, event.Virtual.Spec.Selector) {
+	// the logic here is that when the virtual object has changed we sync the labels to the host. If the host object has changed and the virtual object has not, we sync the labels to the virtual cluster.
+	// If nothing has changed, we make sure to sync the labels from the virtual cluster to the host. This is necessary because earlier versions of vCluster did sync the labels differently and rewrote them
+	// so we need to make sure those are always correctly synced.
+	if !apiequality.Semantic.DeepEqual(event.VirtualOld.Spec.Selector, event.Virtual.Spec.Selector) || apiequality.Semantic.DeepEqual(event.HostOld.Spec.Selector, event.Host.Spec.Selector) {
 		event.Host.Spec.Selector = translate.HostLabelsMap(event.Virtual.Spec.Selector, event.Host.Spec.Selector, event.Virtual.Namespace, false)
 	} else {
 		event.Virtual.Spec.Selector = translate.VirtualLabelsMap(event.Host.Spec.Selector, event.Virtual.Spec.Selector)
@@ -221,11 +220,11 @@ func (s *serviceSyncer) SyncToVirtual(ctx *synccontext.SyncContext, event *syncc
 	// we have to delay deletion here if a vObj does not (yet) exist for a service that was just
 	// created, because vcluster intercepts those calls and first creates a service inside the host
 	// cluster and then inside the virtual cluster.
-	if event.Host.Annotations != nil && event.Host.Annotations[ServiceBlockDeletion] == "true" {
-		return ctrl.Result{Requeue: true}, nil
+	if event.Host.Annotations != nil && event.Host.Annotations[ServiceBlockDeletion] == "true" && time.Since(event.Host.CreationTimestamp.Time) < 2*time.Minute {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	if event.VirtualOld != nil || event.Host.DeletionTimestamp != nil {
+	if event.VirtualOld != nil || translate.ShouldDeleteHostObject(event.Host) {
 		return patcher.DeleteHostObject(ctx, event.Host, event.VirtualOld, "virtual object was deleted")
 	}
 
@@ -242,6 +241,7 @@ func recreateService(ctx *synccontext.SyncContext, virtualClient client.Client, 
 	// delete & create with correct ClusterIP
 	err := virtualClient.Delete(ctx, vService)
 	if err != nil && !kerrors.IsNotFound(err) {
+		klog.Errorf("error deleting virtual service: %s/%s: %v", vService.Namespace, vService.Name, err)
 		return err
 	}
 

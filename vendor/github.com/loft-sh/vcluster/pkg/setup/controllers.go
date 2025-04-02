@@ -175,7 +175,23 @@ func StartControllers(controllerContext *synccontext.ControllerContext, syncers 
 
 func ApplyCoreDNS(controllerContext *synccontext.ControllerContext) {
 	_ = wait.ExponentialBackoffWithContext(controllerContext.Context, wait.Backoff{Duration: time.Second, Factor: 1.5, Cap: time.Minute, Steps: math.MaxInt32}, func(ctx context.Context) (bool, error) {
-		err := coredns.ApplyManifest(ctx, controllerContext.Config.ControlPlane.Advanced.DefaultImageRegistry, controllerContext.VirtualManager.GetConfig(), controllerContext.VirtualClusterVersion)
+		dnsDeployment := &appsv1.Deployment{}
+		err := controllerContext.VirtualManager.GetClient().Get(controllerContext.Context, types.NamespacedName{Namespace: "kube-system", Name: "coredns"}, dnsDeployment)
+		if err != nil && !kerrors.IsNotFound(err) {
+			return false, err
+		}
+		if err == nil {
+			// dns pod labels were changed to avoid conflict with apps running in the host cluster that select for the "kube-dns" label, e.g. cilium.
+			// If the deployment already exists with a label selector that is not "vcluster-kube-dns" then it needs to be deleted because the selector field is immutable.
+			// Otherwise, dns will break because the dns service will target the updated label but not match any deployments.
+			if dnsDeployment.Spec.Selector.MatchLabels["k8s-app"] != "vcluster-kube-dns" {
+				err = controllerContext.VirtualManager.GetClient().Delete(controllerContext.Context, dnsDeployment)
+				if err != nil && !kerrors.IsNotFound(err) {
+					return false, err
+				}
+			}
+		}
+		err = coredns.ApplyManifest(ctx, controllerContext.Config.ControlPlane.Advanced.DefaultImageRegistry, controllerContext.VirtualManager.GetConfig(), controllerContext.VirtualClusterVersion)
 		if err != nil {
 			if errors.Is(err, coredns.ErrNoCoreDNSManifests) {
 				klog.Infof("No CoreDNS manifests found, skipping CoreDNS configuration")
@@ -211,29 +227,30 @@ func SyncKubernetesService(ctx *synccontext.ControllerContext) error {
 	return nil
 }
 
-func WriteKubeConfigToSecret(ctx context.Context, virtualConfig *rest.Config, currentNamespace string, currentNamespaceClient client.Client, options *config.VirtualClusterConfig, syncerConfig *clientcmdapi.Config) error {
-	syncerConfig, err := CreateVClusterKubeConfig(syncerConfig, options)
+func CreateVClusterKubeConfigForExport(ctx context.Context, virtualConfig *rest.Config, syncerConfig *clientcmdapi.Config, options CreateKubeConfigOptions) (*clientcmdapi.Config, error) {
+	syncerConfigToExport, err := CreateVClusterKubeConfig(syncerConfig, options)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	var customSyncerConfig *clientcmdapi.Config
+	// should use special server?
 	if options.ExportKubeConfig.Server != "" {
-		// Create a deep copy of syncerConfig to modify the server for the additional secret
-		customSyncerConfig = syncerConfig.DeepCopy()
-		for key, cluster := range customSyncerConfig.Clusters {
-			if cluster != nil {
-				customSyncerConfig.Clusters[key] = &clientcmdapi.Cluster{
-					Server:                   options.ExportKubeConfig.Server,
-					Extensions:               make(map[string]runtime.Object),
-					CertificateAuthorityData: cluster.CertificateAuthorityData,
-					InsecureSkipTLSVerify:    options.ExportKubeConfig.Insecure,
-				}
+		// exchange kube config server & resolve certificate
+		for key, cluster := range syncerConfigToExport.Clusters {
+			if cluster == nil {
+				continue
+			}
+
+			syncerConfigToExport.Clusters[key] = &clientcmdapi.Cluster{
+				Server:                   options.ExportKubeConfig.Server,
+				Extensions:               make(map[string]runtime.Object),
+				CertificateAuthorityData: cluster.CertificateAuthorityData,
+				InsecureSkipTLSVerify:    options.ExportKubeConfig.Insecure,
 			}
 		}
 	}
 
-	// Apply service account token if specified
+	// should use service account token for secret?
 	if options.ExportKubeConfig.ServiceAccount.Name != "" {
 		serviceAccountNamespace := options.ExportKubeConfig.ServiceAccount.Namespace
 		if serviceAccountNamespace == "" {
@@ -242,48 +259,74 @@ func WriteKubeConfigToSecret(ctx context.Context, virtualConfig *rest.Config, cu
 
 		kubeClient, err := kubernetes.NewForConfig(virtualConfig)
 		if err != nil {
-			return fmt.Errorf("create kube client: %w", err)
+			return nil, fmt.Errorf("create kube client: %w", err)
 		}
 
 		token, err := serviceaccount.CreateServiceAccountToken(ctx, kubeClient, options.ExportKubeConfig.ServiceAccount.Name, serviceAccountNamespace, options.ExportKubeConfig.ServiceAccount.ClusterRole, 0, log.NewFromExisting(klog.FromContext(ctx), "write-kube-context"))
 		if err != nil {
-			return fmt.Errorf("create service account token for export kube config: %w", err)
+			return nil, fmt.Errorf("create service account token for export kube config: %w", err)
 		}
 
-		// Apply the token to both syncerConfig and customSyncerConfig (if it exists)
-		applyAuthToken(syncerConfig, token)
-		if customSyncerConfig != nil {
-			applyAuthToken(customSyncerConfig, token)
+		for k := range syncerConfigToExport.AuthInfos {
+			syncerConfigToExport.AuthInfos[k] = &clientcmdapi.AuthInfo{
+				Token:                token,
+				Extensions:           make(map[string]runtime.Object),
+				ImpersonateUserExtra: make(map[string][]string),
+			}
 		}
 	}
 
-	// Write the additional secret if specified
-	if options.ExportKubeConfig.Secret.Name != "" {
-		secretNamespace := options.ExportKubeConfig.Secret.Namespace
+	return syncerConfigToExport, nil
+}
+
+func WriteKubeConfigToSecret(ctx context.Context, virtualConfig *rest.Config, currentNamespace string, currentNamespaceClient client.Client, options *config.VirtualClusterConfig, syncerConfig *clientcmdapi.Config) error {
+	// Write the default kubeconfig secret.
+	createKubeConfigOptions := CreateKubeConfigOptions{
+		ControlPlaneProxy: options.ControlPlane.Proxy,
+		ExportKubeConfig:  options.ExportKubeConfig.ExportKubeConfigProperties,
+	}
+	defaultKubeConfig, err := CreateVClusterKubeConfigForExport(ctx, virtualConfig, syncerConfig.DeepCopy(), createKubeConfigOptions)
+	if err != nil {
+		return fmt.Errorf("failed to create kubeconfig that is exported to the default kubeconfig secret: %w", err)
+	}
+	isIsolatedControlPlaneKubeConfigSet := options.Experimental.IsolatedControlPlane.KubeConfig != ""
+	err = kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, kubeconfig.GetDefaultSecretName(translate.VClusterName), currentNamespace, defaultKubeConfig, isIsolatedControlPlaneKubeConfigSet, options.Name)
+	if err != nil {
+		return fmt.Errorf("creating the default kubeconfig secret in the %s ns failed: %w", currentNamespace, err)
+	}
+
+	// Write the additional kubeconfig secrets. Here we get the additional secrets with the GetAdditionalSecrets() func
+	// which will return either the deprecated ExportKubeConfig.Secret config or the new ExportKubeConfig.AdditionalSecrets
+	// config.
+	for _, additionalSecret := range options.ExportKubeConfig.GetAdditionalSecrets() {
+		createKubeConfigOptions = CreateKubeConfigOptions{
+			ControlPlaneProxy: options.ControlPlane.Proxy,
+			ExportKubeConfig:  additionalSecret.ExportKubeConfigProperties,
+		}
+		additionalKubeConfig, err := CreateVClusterKubeConfigForExport(ctx, virtualConfig, syncerConfig.DeepCopy(), createKubeConfigOptions)
+		if err != nil {
+			return fmt.Errorf("failed to create kubeconfig that is exported to the additional kubeconfig secret: %w", err)
+		}
+
+		// if the additional secret name is not specified, fallback to the default secret name
+		secretName := additionalSecret.Name
+		if secretName == "" {
+			secretName = kubeconfig.GetDefaultSecretName(translate.VClusterName)
+		}
+		// if the additional secret namespace is not specified, fallback to the current namespace
+		secretNamespace := additionalSecret.Namespace
 		if secretNamespace == "" {
 			secretNamespace = currentNamespace
 		}
 
-		// Use customSyncerConfig for the additional secret if it was modified, else syncerConfig
-		err = kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, options.ExportKubeConfig.Secret.Name, secretNamespace, customSyncerConfig, options.Experimental.IsolatedControlPlane.KubeConfig != "")
+		// write the additional kubeconfig secret
+		err = kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, secretName, secretNamespace, additionalKubeConfig, isIsolatedControlPlaneKubeConfigSet, options.Name)
 		if err != nil {
-			return fmt.Errorf("creating %s secret in the %s ns failed: %w", options.ExportKubeConfig.Secret.Name, secretNamespace, err)
+			return fmt.Errorf("creating additional secret %s in the %s ns failed: %w", secretName, secretNamespace, err)
 		}
 	}
 
-	// Write the default secret using syncerConfig, which retains the original Server value
-	return kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, kubeconfig.GetDefaultSecretName(translate.VClusterName), currentNamespace, syncerConfig, options.Experimental.IsolatedControlPlane.KubeConfig != "")
-}
-
-// applyAuthToken sets the provided token in all AuthInfos of the given config
-func applyAuthToken(config *clientcmdapi.Config, token string) {
-	for k := range config.AuthInfos {
-		config.AuthInfos[k] = &clientcmdapi.AuthInfo{
-			Token:                token,
-			Extensions:           make(map[string]runtime.Object),
-			ImpersonateUserExtra: make(map[string][]string),
-		}
-	}
+	return nil
 }
 
 func MigrateMappers(ctx *synccontext.RegisterContext, syncers []syncertypes.Object) error {

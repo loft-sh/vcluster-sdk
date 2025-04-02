@@ -26,15 +26,18 @@ import (
 )
 
 const (
-	DefaultSecretPrefix     = "vc-"
-	KubeconfigSecretKey     = "config"
-	CADataSecretKey         = "certificate-authority"
-	CertificateSecretKey    = "client-certificate"
-	CertificateKeySecretKey = "client-key"
-	TokenSecretKey          = "token"
+	DefaultSecretPrefix             = "vc-"
+	KubeconfigSecretKey             = "config"
+	CADataSecretKey                 = "certificate-authority"
+	CertificateSecretKey            = "client-certificate"
+	CertificateKeySecretKey         = "client-key"
+	TokenSecretKey                  = "token"
+	KubeConfigSecretLabelAppKey     = "app"
+	KubeConfigSecretLabelAppValue   = "vcluster"
+	KubeConfigSecretVclusterNameKey = "vcluster-name"
 )
 
-func WriteKubeConfig(ctx context.Context, currentNamespaceClient client.Client, secretName, secretNamespace string, config *clientcmdapi.Config, isRemote bool) error {
+func WriteKubeConfig(ctx context.Context, currentNamespaceClient client.Client, secretName, secretNamespace string, config *clientcmdapi.Config, isRemote bool, vClusterName string) error {
 	out, err := clientcmd.Write(*config)
 	if err != nil {
 		return err
@@ -70,6 +73,10 @@ func WriteKubeConfig(ctx context.Context, currentNamespaceClient client.Client, 
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      secretName,
 				Namespace: secretNamespace,
+				Labels: map[string]string{
+					KubeConfigSecretLabelAppKey:     KubeConfigSecretLabelAppValue,
+					KubeConfigSecretVclusterNameKey: vClusterName,
+				},
 			},
 		}
 		result, err := controllerutil.CreateOrPatch(ctx, currentNamespaceClient, kubeConfigSecret, func() error {
@@ -189,34 +196,29 @@ func ConvertRestConfigToClientConfig(config *rest.Config) (clientcmd.ClientConfi
 	return clientcmd.NewDefaultClientConfig(*kubeConfig, &clientcmd.ConfigOverrides{}), nil
 }
 
-func ResolveKubeConfig(rawConfig clientcmd.ClientConfig) ([]byte, error) {
+func ResolveKubeConfig(rawConfig clientcmd.ClientConfig) (clientcmdapi.Config, error) {
 	restConfig, err := rawConfig.ClientConfig()
 	if err != nil {
-		return nil, err
+		return clientcmdapi.Config{}, err
 	}
 
 	// convert exec auth
 	if restConfig.ExecProvider != nil {
 		err = resolveExecCredentials(restConfig)
 		if err != nil {
-			return nil, fmt.Errorf("resolve exec credentials: %w", err)
+			return clientcmdapi.Config{}, fmt.Errorf("resolve exec credentials: %w", err)
 		}
 	}
 	if restConfig.AuthProvider != nil {
-		return nil, fmt.Errorf("auth provider is not supported")
+		return clientcmdapi.Config{}, fmt.Errorf("auth provider is not supported")
 	}
 
 	retConfig, err := ConvertRestConfigToClientConfig(restConfig)
 	if err != nil {
-		return nil, err
+		return clientcmdapi.Config{}, err
 	}
 
-	retRawConfig, err := retConfig.RawConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	return clientcmd.Write(retRawConfig)
+	return retConfig.RawConfig()
 }
 
 func resolveExecCredentials(restConfig *rest.Config) error {

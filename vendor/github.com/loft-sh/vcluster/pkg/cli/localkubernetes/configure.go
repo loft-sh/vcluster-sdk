@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/loft-sh/log"
@@ -28,7 +30,7 @@ func (c ClusterType) LocalKubernetes() bool {
 
 func ExposeLocal(ctx context.Context, rawConfig *clientcmdapi.Config, vRawConfig *clientcmdapi.Config, service *corev1.Service) (string, error) {
 	// Timeout to wait for connection before falling back to port-forwarding
-	timeout := time.Second * 30
+	timeout := time.Second * 5
 	clusterType := DetectClusterType(rawConfig)
 	switch clusterType {
 	case ClusterTypeOrbstack:
@@ -107,37 +109,17 @@ func directConnection(ctx context.Context, vRawConfig *clientcmdapi.Config, serv
 	return server, nil
 }
 
-func CreateBackgroundProxyContainer(ctx context.Context, vClusterName, vClusterNamespace string, rawConfig clientcmd.ClientConfig, vRawConfig *clientcmdapi.Config, localPort int, log log.Logger) (string, error) {
+// CreateBackgroundProxyContainer runs kubectl port-forward in a docker container, forwarding from the vcluster service
+// on the host cluster to a port matching the kubernetes context for the virtual cluster.
+func CreateBackgroundProxyContainer(_ context.Context, vClusterName, vClusterNamespace string, rawConfig clientcmd.ClientConfig, localPort int, log log.Logger) (string, error) {
 	rawConfigObj, err := rawConfig.RawConfig()
 	if err != nil {
 		return "", err
 	}
 
-	// write kube config to buffer
-	physicalCluster, err := kubeconfig.ResolveKubeConfig(rawConfig)
+	physicalRawConfig, err := kubeconfig.ResolveKubeConfig(rawConfig)
 	if err != nil {
 		return "", fmt.Errorf("resolve kube config: %w", err)
-	}
-
-	// write a temporary kube file
-	tempFile, err := os.CreateTemp("", "")
-	if err != nil {
-		return "", errors.Wrap(err, "create temp file")
-	}
-	_, err = tempFile.Write(physicalCluster)
-	if err != nil {
-		return "", errors.Wrap(err, "write kube config to temp file")
-	}
-	err = tempFile.Close()
-	if err != nil {
-		return "", errors.Wrap(err, "close temp file")
-	}
-	kubeConfigPath := tempFile.Name()
-
-	// allow permissions for kube config path
-	err = os.Chmod(kubeConfigPath, 0666)
-	if err != nil {
-		return "", fmt.Errorf("chmod temp file: %w", err)
 	}
 
 	// construct proxy name
@@ -146,39 +128,114 @@ func CreateBackgroundProxyContainer(ctx context.Context, vClusterName, vClusterN
 	// check if the background proxy container for this vcluster is running and then remove it.
 	_ = CleanupBackgroundProxy(proxyName, log)
 
-	// build the command
-	cmd := exec.Command(
-		"docker",
-		"run",
-		"-d",
-		"-v", fmt.Sprintf("%v:%v", kubeConfigPath, "/kube-config"),
-		fmt.Sprintf("--name=%s", proxyName),
-		"--network=host",
-		"bitnami/kubectl:1.29",
-		"port-forward",
-		"svc/"+vClusterName,
-		strconv.Itoa(localPort)+":443",
-		"--kubeconfig", "/kube-config",
-		"-n", vClusterNamespace,
-	)
-	log.Infof("Starting background proxy container...")
-	out, err := cmd.CombinedOutput()
+	cmd, err := buildDockerCommand(physicalRawConfig, proxyName, vClusterName, vClusterNamespace, localPort)
 	if err != nil {
-		return "", errors.Errorf("error starting background proxy: %s %v", string(out), err)
-	}
-	server := fmt.Sprintf("https://127.0.0.1:%v", localPort)
-	waitErr := wait.PollUntilContextTimeout(ctx, time.Second, time.Second*60, true, func(ctx context.Context) (bool, error) {
-		err = testConnectionWithServer(ctx, vRawConfig, server)
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
-	})
-	if waitErr != nil {
-		return "", fmt.Errorf("test connection: %w %w", waitErr, err)
+		return "", fmt.Errorf("build docker command: %w", err)
 	}
 
-	return server, nil
+	log.Infof("Starting background proxy container...")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", errors.Errorf("error starting background proxy: %s %v", string(out), err)
+	}
+
+	return fmt.Sprintf("https://127.0.0.1:%v", localPort), nil
+}
+
+// build a different docker command for darwin vs. everything else
+func buildDockerCommand(physicalRawConfig clientcmdapi.Config, proxyName, vClusterName, vClusterNamespace string, localPort int) (*exec.Cmd, error) {
+	// write a temporary kube file
+	tempFile, err := os.CreateTemp("", "")
+	if err != nil {
+		return nil, errors.Wrap(err, "create temp file")
+	}
+
+	kubeConfigPath := tempFile.Name()
+
+	var cmd *exec.Cmd
+	// For non-linux, update the kube config to point to the special host.docker.internal and don't use
+	// host networking.
+	if runtime.GOOS != "linux" {
+		physicalRawConfig, err = updateConfigForDockerToHost(physicalRawConfig)
+		if err != nil {
+			return nil, fmt.Errorf("update config: %w", err)
+		}
+
+		cmd = exec.Command(
+			"docker",
+			"run",
+			"--rm",
+			"-d",
+			"-v", fmt.Sprintf("%v:%v", kubeConfigPath, "/kube-config"),
+			fmt.Sprintf("--name=%s", proxyName),
+			"-p",
+			fmt.Sprintf("%d:8443", localPort),
+			"bitnami/kubectl:1.29",
+			"port-forward",
+			"svc/"+vClusterName,
+			"--address=0.0.0.0",
+			"8443:443",
+			"--kubeconfig", "/kube-config",
+			"-n", vClusterNamespace,
+		)
+	} else {
+		cmd = exec.Command(
+			"docker",
+			"run",
+			"--rm",
+			"-d",
+			"-v", fmt.Sprintf("%v:%v", kubeConfigPath, "/kube-config"),
+			fmt.Sprintf("--name=%s", proxyName),
+			"--network=host",
+			"bitnami/kubectl:1.29",
+			"port-forward",
+			"svc/"+vClusterName,
+			"--address=0.0.0.0",
+			strconv.Itoa(localPort)+":443",
+			"--kubeconfig", "/kube-config",
+			"-n", vClusterNamespace,
+		)
+	}
+
+	// write kube config to buffer
+	physicalCluster, err := clientcmd.Write(physicalRawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write config: %w", err)
+	}
+
+	if _, err = tempFile.Write(physicalCluster); err != nil {
+		return nil, errors.Wrap(err, "write kube config to temp file")
+	}
+
+	if err = tempFile.Close(); err != nil {
+		return nil, errors.Wrap(err, "close temp file")
+	}
+
+	// allow permissions for kube config path
+	if err = os.Chmod(kubeConfigPath, 0666); err != nil {
+		return nil, fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	return cmd, nil
+}
+
+// Update the configuration for the local cluster to be able to reach the host via the special host.docker.internal address
+func updateConfigForDockerToHost(rawConfig clientcmdapi.Config) (clientcmdapi.Config, error) {
+	updated := rawConfig.DeepCopy()
+
+	if updated.Clusters == nil {
+		return clientcmdapi.Config{}, fmt.Errorf("config missing clusters")
+	}
+
+	if _, ok := updated.Clusters["local"]; !ok {
+		return clientcmdapi.Config{}, fmt.Errorf("config missing local cluster")
+	}
+
+	localCluster := updated.Clusters["local"]
+	localCluster.InsecureSkipTLSVerify = true
+	localCluster.CertificateAuthorityData = nil
+	localCluster.Server = strings.ReplaceAll(localCluster.Server, "127.0.0.1", "host.docker.internal")
+
+	return *updated, nil
 }
 
 func IsDockerInstalledAndUpAndRunning() bool {

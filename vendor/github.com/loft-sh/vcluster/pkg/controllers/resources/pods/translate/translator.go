@@ -41,6 +41,8 @@ const (
 	ClusterAutoScalerDaemonSetAnnotation = "cluster-autoscaler.kubernetes.io/daemonset-pod"
 	ServiceAccountNameAnnotation         = "vcluster.loft.sh/service-account-name"
 	ServiceAccountTokenAnnotation        = "vcluster.loft.sh/token-"
+	HostIPAnnotation                     = "vcluster.loft.sh/host-ip"
+	HostIPsAnnotation                    = "vcluster.loft.sh/host-ips"
 )
 
 var (
@@ -100,9 +102,11 @@ func NewTranslator(ctx *synccontext.RegisterContext, eventRecorder record.EventR
 		overrideHostsImage:     ctx.Config.Sync.ToHost.Pods.RewriteHosts.InitContainer.Image,
 		overrideHostsResources: resourceRequirements,
 
-		serviceAccountsEnabled: ctx.Config.Sync.ToHost.ServiceAccounts.Enabled,
-		priorityClassesEnabled: ctx.Config.Sync.ToHost.PriorityClasses.Enabled,
-		enableScheduler:        ctx.Config.ControlPlane.Advanced.VirtualScheduler.Enabled,
+		serviceAccountsEnabled:         ctx.Config.Sync.ToHost.ServiceAccounts.Enabled,
+		hostPriorityClassesSyncEnabled: ctx.Config.Sync.FromHost.PriorityClasses.Enabled,
+		priorityClassesSyncEnabled:     ctx.Config.Sync.ToHost.PriorityClasses.Enabled,
+		enableScheduler:                ctx.Config.ControlPlane.Advanced.VirtualScheduler.Enabled,
+		fakeKubeletIPs:                 ctx.Config.Networking.Advanced.ProxyKubelets.ByIP,
 
 		mountPhysicalHostPaths: ctx.Config.ControlPlane.HostPathMapper.Enabled && !ctx.Config.ControlPlane.HostPathMapper.Central,
 
@@ -125,15 +129,17 @@ type translator struct {
 	// this is needed for host path mapper (legacy)
 	mountPhysicalHostPaths bool
 
-	serviceAccountsEnabled       bool
-	serviceAccountSecretsEnabled bool
-	clusterDomain                string
-	serviceAccount               string
-	overrideHosts                bool
-	overrideHostsImage           string
-	overrideHostsResources       corev1.ResourceRequirements
-	priorityClassesEnabled       bool
-	enableScheduler              bool
+	serviceAccountsEnabled         bool
+	serviceAccountSecretsEnabled   bool
+	clusterDomain                  string
+	serviceAccount                 string
+	overrideHosts                  bool
+	overrideHostsImage             string
+	overrideHostsResources         corev1.ResourceRequirements
+	hostPriorityClassesSyncEnabled bool
+	priorityClassesSyncEnabled     bool
+	enableScheduler                bool
+	fakeKubeletIPs                 bool
 
 	virtualLogsPath       string
 	virtualPodLogsPath    string
@@ -168,15 +174,28 @@ func (t *translator) Translate(ctx *synccontext.SyncContext, vPod *corev1.Pod, s
 	pPod.Spec.AutomountServiceAccountToken = &False
 	pPod.Spec.EnableServiceLinks = &False
 
-	// check if priority classes are enabled
-	if !t.priorityClassesEnabled {
-		pPod.Spec.PriorityClassName = ""
-		pPod.Spec.Priority = nil
-	} else if pPod.Spec.PriorityClassName != "" {
+	allPriorityClassesSyncingDisabled := !t.priorityClassesSyncEnabled && !t.hostPriorityClassesSyncEnabled
+
+	// by default the priority class would be synced as-is to the host
+	// this will readily work when config.Sync.FromHost.PriorityClasses.Enabled is true
+	// however, in case when config.Sync.ToHost.PriorityClasses.Enabled is true, we
+	// need to translate the priorityClassName before syncing to host
+	if t.priorityClassesSyncEnabled && pPod.Spec.PriorityClassName != "" {
 		pPod.Spec.PriorityClassName = mappings.VirtualToHostName(ctx, pPod.Spec.PriorityClassName, "", mappings.PriorityClasses())
 		if pPod.Spec.Priority != nil && *pPod.Spec.Priority > maxPriority {
 			pPod.Spec.Priority = &maxPriority
 		}
+	} else if allPriorityClassesSyncingDisabled {
+		// reset the priorityClassName when both fromHost & toHost sync are disabled
+		pPod.Spec.PriorityClassName = ""
+		pPod.Spec.Priority = nil
+	}
+
+	// if the Config.Sync.ToHost.Pods.PriorityClassName is specified and priorityClassName is unset on the pod
+	// we set it accordingly
+	if ctx.Config.Sync.ToHost.Pods.PriorityClassName != "" && pPod.Spec.PriorityClassName == "" {
+		pPod.Spec.PriorityClassName = ctx.Config.Sync.ToHost.Pods.PriorityClassName
+		pPod.Spec.Priority = nil
 	}
 
 	// Add an annotation for namespace, name and uid
@@ -325,6 +344,11 @@ func (t *translator) Translate(ctx *synccontext.SyncContext, vPod *corev1.Pod, s
 		return nil, err
 	}
 
+	// add runtime class name
+	if ctx.Config.Sync.ToHost.Pods.RuntimeClassName != "" {
+		pPod.Spec.RuntimeClassName = &ctx.Config.Sync.ToHost.Pods.RuntimeClassName
+	}
+
 	// translate topology spread constraints
 	if t.enableScheduler {
 		pPod.Spec.TopologySpreadConstraints = nil
@@ -405,7 +429,7 @@ func (t *translator) translateVolumes(ctx *synccontext.SyncContext, pPod *corev1
 		}
 		if pPod.Spec.Volumes[i].DownwardAPI != nil {
 			for j := range pPod.Spec.Volumes[i].DownwardAPI.Items {
-				translateFieldRef(pPod.Spec.Volumes[i].DownwardAPI.Items[j].FieldRef)
+				translateFieldRef(pPod.Spec.Volumes[i].DownwardAPI.Items[j].FieldRef, t.fakeKubeletIPs, t.enableScheduler)
 			}
 		}
 		if pPod.Spec.Volumes[i].ISCSI != nil && pPod.Spec.Volumes[i].ISCSI.SecretRef != nil {
@@ -471,7 +495,7 @@ func (t *translator) translateProjectedVolume(
 		}
 		if projectedVolume.Sources[i].DownwardAPI != nil {
 			for j := range projectedVolume.Sources[i].DownwardAPI.Items {
-				translateFieldRef(projectedVolume.Sources[i].DownwardAPI.Items[j].FieldRef)
+				translateFieldRef(projectedVolume.Sources[i].DownwardAPI.Items[j].FieldRef, t.fakeKubeletIPs, t.enableScheduler)
 			}
 		}
 		if projectedVolume.Sources[i].ServiceAccountToken != nil {
@@ -570,7 +594,7 @@ func (t *translator) translateProjectedVolume(
 	return nil
 }
 
-func translateFieldRef(fieldSelector *corev1.ObjectFieldSelector) {
+func translateFieldRef(fieldSelector *corev1.ObjectFieldSelector, fakeKubeletIPs, enableScheduler bool) {
 	if fieldSelector == nil {
 		return
 	}
@@ -593,13 +617,22 @@ func translateFieldRef(fieldSelector *corev1.ObjectFieldSelector) {
 		fieldSelector.FieldPath = "metadata.annotations['" + UIDAnnotation + "']"
 	case "spec.serviceAccountName":
 		fieldSelector.FieldPath = "metadata.annotations['" + ServiceAccountNameAnnotation + "']"
+	// translate downward API references for status.hostIP(s) only when both virtual scheduler & fakeKubeletIPs are enabled
+	case "status.hostIP":
+		if fakeKubeletIPs && enableScheduler {
+			fieldSelector.FieldPath = "metadata.annotations['" + HostIPAnnotation + "']"
+		}
+	case "status.hostIPs":
+		if fakeKubeletIPs && enableScheduler {
+			fieldSelector.FieldPath = "metadata.annotations['" + HostIPsAnnotation + "']"
+		}
 	}
 }
 
 func (t *translator) TranslateContainerEnv(ctx *synccontext.SyncContext, envVar []corev1.EnvVar, envFrom []corev1.EnvFromSource, vPod *corev1.Pod, serviceEnvMap map[string]string) ([]corev1.EnvVar, []corev1.EnvFromSource, error) {
 	envNameMap := make(map[string]struct{})
 	for j, env := range envVar {
-		translateDownwardAPI(&envVar[j])
+		translateDownwardAPI(&envVar[j], t.fakeKubeletIPs, t.enableScheduler)
 		if env.ValueFrom != nil && env.ValueFrom.ConfigMapKeyRef != nil && env.ValueFrom.ConfigMapKeyRef.Name != "" {
 			envVar[j].ValueFrom.ConfigMapKeyRef.Name = mappings.VirtualToHostName(ctx, envVar[j].ValueFrom.ConfigMapKeyRef.Name, vPod.Namespace, mappings.ConfigMaps())
 		}
@@ -640,14 +673,14 @@ func (t *translator) TranslateContainerEnv(ctx *synccontext.SyncContext, envVar 
 	return envVar, envFrom, nil
 }
 
-func translateDownwardAPI(env *corev1.EnvVar) {
+func translateDownwardAPI(env *corev1.EnvVar, fakeKubeletIPs, enableScheduler bool) {
 	if env.ValueFrom == nil {
 		return
 	}
 	if env.ValueFrom.FieldRef == nil {
 		return
 	}
-	translateFieldRef(env.ValueFrom.FieldRef)
+	translateFieldRef(env.ValueFrom.FieldRef, fakeKubeletIPs, enableScheduler)
 }
 
 func (t *translator) translateDNSConfig(pPod *corev1.Pod, vPod *corev1.Pod, nameServer string) {

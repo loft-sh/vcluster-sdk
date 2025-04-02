@@ -37,7 +37,7 @@ func NewSyncController(ctx *synccontext.RegisterContext, syncer syncertypes.Sync
 
 	var objectCache *synccontext.BidirectionalObjectCache
 	if options.ObjectCaching {
-		objectCache = synccontext.NewBidirectionalObjectCache(syncer.Resource().DeepCopyObject().(client.Object))
+		objectCache = synccontext.NewBidirectionalObjectCache(syncer.Resource().DeepCopyObject().(client.Object), syncer)
 	}
 
 	return &SyncController{
@@ -66,6 +66,16 @@ func NewSyncController(ctx *synccontext.RegisterContext, syncer syncertypes.Sync
 }
 
 func RegisterSyncer(ctx *synccontext.RegisterContext, syncer syncertypes.Syncer) error {
+	customManagerProvider, ok := syncer.(syncertypes.ManagerProvider)
+	if ok {
+		// if syncer needs a custom physical manager, ctx.PhysicalManager will get exchanged here
+		var err error
+		ctx, err = customManagerProvider.ConfigureAndStartManager(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	controller, err := NewSyncController(ctx, syncer)
 	if err != nil {
 		return err
@@ -101,7 +111,7 @@ type SyncController struct {
 }
 
 func (r *SyncController) newSyncContext(ctx context.Context, logName string) *synccontext.SyncContext {
-	return &synccontext.SyncContext{
+	syncCtx := &synccontext.SyncContext{
 		Context:                ctx,
 		Config:                 r.config,
 		Log:                    loghelper.NewFromExisting(r.log.Base(), logName),
@@ -112,6 +122,7 @@ func (r *SyncController) newSyncContext(ctx context.Context, logName string) *sy
 		VirtualClient:          r.virtualClient,
 		Mappings:               r.mappings,
 	}
+	return syncCtx
 }
 
 func (r *SyncController) Reconcile(ctx context.Context, vReq reconcile.Request) (res ctrl.Result, retErr error) {
@@ -132,6 +143,12 @@ func (r *SyncController) Reconcile(ctx context.Context, vReq reconcile.Request) 
 		if err := syncContext.Close(); err != nil {
 			retErr = errors.Join(retErr, err)
 		}
+	}()
+
+	// debug log request
+	klog.FromContext(ctx).V(1).Info("Reconcile started")
+	defer func() {
+		klog.FromContext(ctx).V(1).Info("Reconcile ended")
 	}()
 
 	// check if we should skip reconcile
@@ -194,19 +211,29 @@ func (r *SyncController) Reconcile(ctx context.Context, vReq reconcile.Request) 
 			}
 		}
 
-		return r.genericSyncer.Sync(syncContext, &synccontext.SyncEvent[client.Object]{
+		result, err := r.genericSyncer.Sync(syncContext, &synccontext.SyncEvent[client.Object]{
 			VirtualOld: vObjOld,
 			Virtual:    vObj,
 
 			HostOld: pObjOld,
 			Host:    pObj,
 		})
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("sync: %w", err)
+		}
+
+		return result, nil
 	} else if vObj != nil {
-		return r.genericSyncer.SyncToHost(syncContext, &synccontext.SyncToHostEvent[client.Object]{
+		result, err := r.genericSyncer.SyncToHost(syncContext, &synccontext.SyncToHostEvent[client.Object]{
 			HostOld: pObjOld,
 
 			Virtual: vObj,
 		})
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("sync to host: %w", err)
+		}
+
+		return result, nil
 	} else if pObj != nil {
 		if pObj.GetAnnotations() != nil {
 			if shouldSkip, ok := pObj.GetAnnotations()[translate.SkipBackSyncInMultiNamespaceMode]; ok && shouldSkip == "true" {
@@ -215,11 +242,16 @@ func (r *SyncController) Reconcile(ctx context.Context, vReq reconcile.Request) 
 			}
 		}
 
-		return r.genericSyncer.SyncToVirtual(syncContext, &synccontext.SyncToVirtualEvent[client.Object]{
+		result, err := r.genericSyncer.SyncToVirtual(syncContext, &synccontext.SyncToVirtualEvent[client.Object]{
 			VirtualOld: vObjOld,
 
 			Host: pObj,
 		})
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("sync to virtual: %w", err)
+		}
+
+		return result, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -252,11 +284,17 @@ func (r *SyncController) getObjects(ctx *synccontext.SyncContext, vReq, pReq ctr
 		var ok bool
 		vObjOld, ok = r.objectCache.Virtual().Get(vReq.NamespacedName)
 		if !ok && vObj != nil {
+			// for upgrading from pre-0.21 clusters we want to re-sync labels for the new objects initially once
+			// since we changed label prefixes so this is required to make sure all labels are initially synced
+			// from virtual to host correctly.
+			vObjOld = vObj.DeepCopyObject().(client.Object)
+			vObjOld.SetLabels(nil)
+			vObjOld.SetResourceVersion("1")
+
 			// only add to cache if it's not deleting
 			if vObj.GetDeletionTimestamp() == nil {
-				r.objectCache.Virtual().Put(vObj)
+				r.objectCache.Virtual().Put(vObjOld)
 			}
-			vObjOld = vObj
 		}
 
 		pObjOld, ok = r.objectCache.Host().Get(pReq.NamespacedName)

@@ -33,11 +33,7 @@ import (
 func Initialize(ctx context.Context, options *config.VirtualClusterConfig) error {
 	// Ensure that service CIDR range is written into the expected location
 	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 2*time.Minute, true, func(waitCtx context.Context) (bool, error) {
-		err := initialize(
-			waitCtx,
-			ctx,
-			options,
-		)
+		err := initialize(waitCtx, options)
 		if err != nil {
 			klog.Errorf("error initializing service cidr, certs and token: %v", err)
 			return false, nil
@@ -55,13 +51,17 @@ func Initialize(ctx context.Context, options *config.VirtualClusterConfig) error
 }
 
 // initialize creates the required secrets and configmaps for the control plane to start
-func initialize(ctx context.Context, parentCtx context.Context, options *config.VirtualClusterConfig) error {
+func initialize(ctx context.Context, options *config.VirtualClusterConfig) error {
 	distro := options.Distro()
 
 	// migrate from
 	migrateFrom := ""
 	if options.ControlPlane.BackingStore.Etcd.Embedded.Enabled && options.ControlPlane.BackingStore.Etcd.Embedded.MigrateFromDeployedEtcd {
-		migrateFrom = "https://" + options.Name + "-etcd:2379"
+		if options.ControlPlane.BackingStore.Etcd.Deploy.Service.Enabled {
+			migrateFrom = "https://" + options.Name + "-etcd:2379"
+		} else {
+			migrateFrom = "https://" + options.Name + "-etcd-headless:2379"
+		}
 	}
 
 	// retrieve service cidr
@@ -96,12 +96,14 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 		// should start embedded etcd?
 		if options.ControlPlane.BackingStore.Etcd.Embedded.Enabled {
 			err = pro.StartEmbeddedEtcd(
-				parentCtx,
+				context.WithoutCancel(ctx),
 				options.Name,
 				options.ControlPlaneNamespace,
 				certificatesDir,
 				int(options.ControlPlane.StatefulSet.HighAvailability.Replicas),
 				migrateFrom,
+				true,
+				options.ControlPlane.StatefulSet.Scheduling.PodManagementPolicy != "Parallel",
 			)
 			if err != nil {
 				return fmt.Errorf("start embedded etcd: %w", err)
@@ -109,7 +111,7 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 		}
 
 		// start k0s
-		parentCtxWithCancel, cancel := context.WithCancel(parentCtx)
+		parentCtxWithCancel, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		go func() {
 			// we need to run this with the parent ctx as otherwise this context will be cancelled by the wait
 			// loop in Initialize
@@ -144,12 +146,14 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 			// we need to run this with the parent ctx as otherwise this context
 			// will be cancelled by the wait loop in Initialize
 			err = pro.StartEmbeddedEtcd(
-				parentCtx,
+				context.WithoutCancel(ctx),
 				options.Name,
 				options.ControlPlaneNamespace,
 				certificatesDir,
 				int(options.ControlPlane.StatefulSet.HighAvailability.Replicas),
 				migrateFrom,
+				true,
+				options.ControlPlane.StatefulSet.Scheduling.PodManagementPolicy != "Parallel",
 			)
 			if err != nil {
 				return fmt.Errorf("start embedded etcd: %w", err)
@@ -160,7 +164,7 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 		go func() {
 			// we need to run this with the parent ctx as otherwise this context will be cancelled by the wait
 			// loop in Initialize
-			err := k3s.StartK3S(parentCtx, options, serviceCIDR, k3sToken)
+			err := k3s.StartK3S(context.WithoutCancel(ctx), options, serviceCIDR, k3sToken)
 			if err != nil {
 				klog.Fatalf("Error running k3s: %v", err)
 			}
@@ -179,12 +183,14 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 		if options.ControlPlane.BackingStore.Etcd.Embedded.Enabled {
 			// start embedded etcd
 			err := pro.StartEmbeddedEtcd(
-				parentCtx,
+				context.WithoutCancel(ctx),
 				options.Name,
 				options.ControlPlaneNamespace,
 				certificatesDir,
 				int(options.ControlPlane.StatefulSet.HighAvailability.Replicas),
 				migrateFrom,
+				true,
+				options.ControlPlane.StatefulSet.Scheduling.PodManagementPolicy != "Parallel",
 			)
 			if err != nil {
 				return fmt.Errorf("start embedded etcd: %w", err)
@@ -196,7 +202,7 @@ func initialize(ctx context.Context, parentCtx context.Context, options *config.
 			// we need to run this with the parent ctx as otherwise this context will be cancelled by the wait
 			// loop in Initialize
 			err := k8s.StartK8S(
-				parentCtx,
+				context.WithoutCancel(ctx),
 				serviceCIDR,
 				options.ControlPlane.Distro.K8S.APIServer,
 				options.ControlPlane.Distro.K8S.ControllerManager,
@@ -228,6 +234,7 @@ func GenerateCerts(ctx context.Context, currentNamespaceClient kubernetes.Interf
 	etcdSans := []string{
 		"localhost",
 		etcdService,
+		etcdService + "-headless",
 		etcdService + "." + currentNamespace,
 		etcdService + "." + currentNamespace + ".svc",
 	}

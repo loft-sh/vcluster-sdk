@@ -1,6 +1,7 @@
 package framework
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/utils/ptr"
 )
 
@@ -222,7 +225,15 @@ func (f *Framework) WaitForServiceInSyncerCache(serviceName string, ns string) e
 }
 
 func (f *Framework) DeleteTestNamespace(ns string, waitUntilDeleted bool) error {
-	err := f.VClusterClient.CoreV1().Namespaces().Delete(f.Context, ns, metav1.DeleteOptions{})
+	// Always delete in the background. The vCluster client timeout is set to 32 seconds, so deleting
+	// in the foreground may cause timeouts in delete requests, which will cause e2e tests to fail.
+	// If you need a blocking/foreground deletion call, you can set waitUntilDeleted to true, which
+	// will result in polling below, where we check if the namespace is deleted.
+	propagationPolicy := metav1.DeletePropagationBackground
+	deleteOptions := metav1.DeleteOptions{
+		PropagationPolicy: &propagationPolicy,
+	}
+	err := f.VClusterClient.CoreV1().Namespaces().Delete(f.Context, ns, deleteOptions)
 	if err != nil {
 		if kerrors.IsNotFound(err) {
 			return nil
@@ -251,6 +262,7 @@ func (f *Framework) CreateCurlPod(ns string) (*corev1.Pod, error) {
 	return f.VClusterClient.CoreV1().Pods(ns).Create(f.Context, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "curl"},
 		Spec: corev1.PodSpec{
+			TerminationGracePeriodSeconds: ptr.To(int64(1)),
 			Containers: []corev1.Container{
 				{
 					Name:            "curl",
@@ -354,7 +366,7 @@ func (f *Framework) CreateEgressNetworkPolicyForDNS(ctx context.Context, ns stri
 					},
 					To: []networkingv1.NetworkPolicyPeer{
 						{
-							PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}},
+							PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "vcluster-kube-dns"}},
 							NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
 						},
 					},
@@ -362,4 +374,36 @@ func (f *Framework) CreateEgressNetworkPolicyForDNS(ctx context.Context, ns stri
 			},
 		},
 	}, metav1.CreateOptions{})
+}
+
+func (f *Framework) ExecCommandInThePod(podName, podNamespace string, command []string) (string, error) {
+	req := f.VClusterClient.CoreV1().RESTClient().Post().Resource("pods").Name(podName).
+		Namespace(podNamespace).SubResource("exec")
+	option := &corev1.PodExecOptions{
+		Command: command,
+		Stdin:   false,
+		Stdout:  true,
+		Stderr:  true,
+		TTY:     true,
+	}
+	req.VersionedParams(
+		option,
+		scheme.ParameterCodec,
+	)
+	exec, err := remotecommand.NewSPDYExecutor(f.VClusterConfig, "POST", req.URL())
+	if err != nil {
+		return "", err
+	}
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+
+	err = exec.StreamWithContext(f.Context, remotecommand.StreamOptions{
+		Stdout: stdout,
+		Stderr: stderr,
+	})
+	if err != nil {
+		return stderr.String(), err
+	}
+
+	return stdout.String(), nil
 }

@@ -20,6 +20,8 @@ sync:
       translateImage: {}
       enforceTolerations: []
       useSecretsForSATokens: false
+      runtimeClassName: ""
+      priorityClassName: ""
       rewriteHosts:
         enabled: true
         initContainer:
@@ -53,6 +55,10 @@ sync:
   fromHost:
     events:
       enabled: true
+    configMaps:
+      enabled: false
+      mappings:
+        byName: {}
     csiDrivers:
       enabled: auto
     csiNodes:
@@ -74,6 +80,10 @@ sync:
       selector:
         all: false
         labels: {}
+    secrets:
+      enabled: false
+      mappings:
+        byName: {}
     volumeSnapshotClasses:
       enabled: false
 
@@ -90,7 +100,7 @@ controlPlane:
         image:
           registry: registry.k8s.io
           repository: kube-apiserver
-          tag: "v1.31.1"
+          tag: "v1.32.1"
       controllerManager:
         enabled: true
         command: []
@@ -99,7 +109,7 @@ controlPlane:
         image:
           registry: registry.k8s.io
           repository: "kube-controller-manager"
-          tag: "v1.31.1"
+          tag: "v1.32.1"
       scheduler:
         command: []
         extraArgs: []
@@ -107,7 +117,7 @@ controlPlane:
         image:
           registry: registry.k8s.io
           repository: "kube-scheduler"
-          tag: "v1.31.1"
+          tag: "v1.32.1"
       env: []
       securityContext: {}
       resources:
@@ -126,7 +136,7 @@ controlPlane:
       image:
         registry: ""
         repository: "rancher/k3s"
-        tag: "v1.31.1-k3s1"
+        tag: "v1.32.1-k3s1"
       securityContext: {}
       resources:
         limits:
@@ -180,7 +190,7 @@ controlPlane:
           image:
             registry: "registry.k8s.io"
             repository: "etcd"
-            tag: "3.5.15-0"
+            tag: "3.5.17-0"
           imagePullPolicy: ""
           extraArgs: []
           env: []
@@ -217,7 +227,6 @@ controlPlane:
           enabled: true
           annotations: {}
         headlessService:
-          enabled: true
           annotations: {}
 
   proxy:
@@ -260,7 +269,7 @@ controlPlane:
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
-              k8s-app: kube-dns
+              k8s-app: vcluster-kube-dns
 
   service:
     enabled: true
@@ -423,6 +432,19 @@ integrations:
         enabled: true
       virtualMachineInstanceMigrations:
         enabled: true
+  certManager:
+    enabled: false
+    sync:
+      toHost:
+        certificates:
+          enabled: true
+        issuers:
+          enabled: true
+      fromHost:
+        clusterIssuers:
+          enabled: true
+          selector:
+            labels: {}
 
 rbac:
   role:
@@ -549,6 +571,8 @@ experimental:
       extraRules: []
     role:
       extraRules: []
+
+  reuseNamespace: false
 
 telemetry:
   enabled: true

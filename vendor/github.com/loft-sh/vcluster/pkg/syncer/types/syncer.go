@@ -91,3 +91,10 @@ type ObjectExcluder interface {
 	ExcludeVirtual(vObj client.Object) bool
 	ExcludePhysical(vObj client.Object) bool
 }
+
+// ManagerProvider allows you to change fields in the RegisterContext for particular syncer.
+// E.g. fromHostSyncer uses it to change default ctx.PhysicalManager to the custom one that watches for multiple
+// namespaces in the host.
+type ManagerProvider interface {
+	ConfigureAndStartManager(ctx *synccontext.RegisterContext) (*synccontext.RegisterContext, error)
+}

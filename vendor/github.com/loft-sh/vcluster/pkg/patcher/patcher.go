@@ -33,6 +33,12 @@ func NoStatusSubResource() Option {
 	})
 }
 
+func SkipHostPatch() Option {
+	return optionFn(func(p *Patcher) {
+		p.SkipHostPatch = true
+	})
+}
+
 func NewSyncerPatcher(ctx *synccontext.SyncContext, pObj, vObj client.Object, options ...Option) (*SyncerPatcher, error) {
 	// virtual cluster patcher
 	vPatcher, err := NewPatcher(vObj, ctx.VirtualClient, options...)
@@ -94,6 +100,8 @@ type Patcher struct {
 	reverseExpressions bool
 
 	NoStatusSubResource bool
+
+	SkipHostPatch bool
 }
 
 // NewPatcher returns an initialized Patcher.
@@ -117,6 +125,9 @@ func NewPatcher(obj client.Object, crClient client.Client, options ...Option) (*
 
 // Patch will attempt to patch the given object, including its status.
 func (h *Patcher) Patch(ctx *synccontext.SyncContext, obj client.Object) error {
+	if h.SkipHostPatch && h.direction == synccontext.SyncVirtualToHost {
+		return nil
+	}
 	// Return early if the object is nil.
 	if clienthelper.IsNilObject(obj) {
 		return fmt.Errorf("expected non-nil object")

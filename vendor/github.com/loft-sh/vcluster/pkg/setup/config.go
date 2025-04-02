@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"k8s.io/client-go/util/retry"
+
 	vclusterconfig "github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/k3s"
@@ -12,7 +14,6 @@ import (
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -21,17 +22,8 @@ const (
 	AnnotationStore  = "vcluster.loft.sh/store"
 )
 
-func InitAndValidateConfig(ctx context.Context, vConfig *config.VirtualClusterConfig) error {
+func InitClients(vConfig *config.VirtualClusterConfig) error {
 	var err error
-
-	// set global vCluster name
-	translate.VClusterName = vConfig.Name
-
-	// set workload namespace
-	err = os.Setenv("NAMESPACE", vConfig.WorkloadNamespace)
-	if err != nil {
-		return fmt.Errorf("set NAMESPACE env var: %w", err)
-	}
 
 	// get host cluster client
 	vConfig.ControlPlaneClient, err = kubernetes.NewForConfig(vConfig.ControlPlaneConfig)
@@ -56,6 +48,25 @@ func InitAndValidateConfig(ctx context.Context, vConfig *config.VirtualClusterCo
 		}
 
 		translate.Default = translate.NewSingleNamespaceTranslator(vConfig.WorkloadTargetNamespace)
+	}
+
+	return nil
+}
+
+func InitAndValidateConfig(ctx context.Context, vConfig *config.VirtualClusterConfig) error {
+	// set global vCluster name
+	translate.VClusterName = vConfig.Name
+
+	// set workload namespace
+	err := os.Setenv("NAMESPACE", vConfig.WorkloadNamespace)
+	if err != nil {
+		return fmt.Errorf("set NAMESPACE env var: %w", err)
+	}
+
+	// init clients
+	err = InitClients(vConfig)
+	if err != nil {
+		return err
 	}
 
 	if err := EnsureBackingStoreChanges(
