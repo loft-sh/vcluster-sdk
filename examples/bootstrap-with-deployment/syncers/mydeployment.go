@@ -3,8 +3,8 @@ package syncers
 import (
 	"fmt"
 
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
-	syncertypes "github.com/loft-sh/vcluster/pkg/types"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
+	syncertypes "github.com/loft-sh/vcluster/pkg/syncer/types"
 	"github.com/loft-sh/vcluster/pkg/util/applier"
 	"k8s.io/klog/v2"
 )
@@ -25,9 +25,9 @@ func (s *myDeploymentSyncer) Name() string {
 	return "mydeploymentsyncer"
 }
 
-var _ syncertypes.Initializer = &myDeploymentSyncer{}
+var _ syncertypes.ControllerStarter = &myDeploymentSyncer{}
 
-func (s *myDeploymentSyncer) Init(ctx *synccontext.RegisterContext) error {
+func (s *myDeploymentSyncer) Register(ctx *synccontext.RegisterContext) error {
 	err := applier.ApplyManifestFile(ctx.Context, ctx.VirtualManager.GetConfig(), MyDeploymentManifestPath)
 	if err != nil {
 		return fmt.Errorf("failed to apply manifest %s: %w", MyDeploymentManifestPath, err)

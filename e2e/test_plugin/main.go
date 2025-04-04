@@ -39,11 +39,6 @@ func main() {
 		klog.Fatalf("new car syncer: %v", err)
 	}
 	plugin.MustRegister(carSyncer)
-	importSecretSyncer, err := syncers.NewImportSecrets(ctx)
-	if err != nil {
-		klog.Fatalf("import secret syncer: %w", err)
-	}
-	plugin.MustRegister(importSecretSyncer)
 	plugin.MustRegister(syncers.DummyInterceptor{})
 
 	klog.Info("finished registering the plugins")
