@@ -40,7 +40,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          password:  ${{ secrets.GH_ACCESS_TOKEN }}
       - name: Build and push the hooks
         uses: docker/build-push-action@v6
         id: docker_build_hooks
@@ -51,6 +51,7 @@ jobs:
           tags: "ghcr.io/loft-sh/vcluster-example-hooks:${{steps.get_version.outputs.release_version}}"
           labels: ${{ steps.docker_meta.outputs.labels }}
           context: ./examples/hooks
+          github-token: ${{ secrets.GH_ACCESS_TOKEN }}
       - name: Images digests for
         run: echo ${{ steps.docker_build_hooks.outputs.digest }}
       - name: Build and push the bootstrap
@@ -63,6 +64,7 @@ jobs:
           push: true
           tags: "ghcr.io/loft-sh/vcluster-example-bootstrap-bootstrap-with-deployment:${{steps.get_version.outputs.release_version}}"
           labels: ${{ steps.docker_meta.outputs.labels }}
+          github-token: ${{ secrets.GH_ACCESS_TOKEN }}
       - name: Images digests for bootstrap
         run: echo ${{ steps.docker_build_bootstrap.outputs.digest }}
       - name: Build and push crd sync
@@ -75,5 +77,6 @@ jobs:
           push: true
           tags: "ghcr.io/loft-sh/vcluster-example-crd-sync:${{steps.get_version.outputs.release_version}}"
           labels: ${{ steps.docker_meta.outputs.labels }}
+          github-token: ${{ secrets.GH_ACCESS_TOKEN }}
       - name: Images digests for crd sync
         run: echo ${{ steps.docker_build_crd_sync.outputs.digest }}
