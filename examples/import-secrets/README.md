@@ -1,4 +1,7 @@
 # Import Secret Plugin
+[DEPRECATED] 
+Please use `sync.fromHost.secrets` with `sync.fromHost.secrets.mappings.byName` (added in v0.23) instead: https://www.vcluster.com/docs/vcluster/configure/vcluster-yaml/sync/from-host/secrets
+
 
 This example plugin syncs all secrets with an annotation from the host cluster
 into vCluster. The secrets are synced from the namespace where vCluster is

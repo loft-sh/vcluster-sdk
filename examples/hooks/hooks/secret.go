@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/loft-sh/vcluster-sdk/plugin"
-	synccontext "github.com/loft-sh/vcluster/pkg/controllers/syncer/context"
-	synctypes "github.com/loft-sh/vcluster/pkg/types"
+	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
+	synctypes "github.com/loft-sh/vcluster/pkg/syncer/types"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,9 +21,9 @@ func NewSecretHook() plugin.ClientHook {
 // to the host cluster, without directly setting the annotation on the secret.
 type secretHook struct{}
 
-var _ synctypes.Initializer = &secretHook{}
+var _ synctypes.ControllerStarter = &secretHook{}
 
-func (s *secretHook) Init(ctx *synccontext.RegisterContext) error {
+func (s *secretHook) Register(ctx *synccontext.RegisterContext) error {
 	virtualClient, err := client.New(ctx.VirtualManager.GetConfig(), client.Options{
 		Scheme: ctx.VirtualManager.GetScheme(),
 		Mapper: ctx.VirtualManager.GetRESTMapper(),

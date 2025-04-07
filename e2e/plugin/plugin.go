@@ -10,7 +10,6 @@ import (
 	"github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -130,67 +129,6 @@ var _ = ginkgo.Describe("Plugin test", func() {
 		framework.ExpectEqual(len(hostService.Spec.Ports), 2)
 		framework.ExpectEqual(hostService.Spec.Ports[1].Name, "plugin")
 		framework.ExpectEqual(hostService.Spec.Ports[1].Port, int32(19000))
-	})
-
-	ginkgo.It("check secret is imported correctly", func() {
-		// create a new secret
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test123",
-				Namespace: f.VClusterNamespace,
-				Annotations: map[string]string{
-					"vcluster.loft.sh/import": "test/test",
-				},
-			},
-			Data: map[string][]byte{
-				"test": []byte("test"),
-			},
-		}
-
-		// create secret
-		err := f.HostCRClient.Create(f.Context, secret)
-		framework.ExpectNoError(err)
-
-		// wait for secret to become synced
-		vSecret := &corev1.Secret{}
-		gomega.Eventually(func() bool {
-			err := f.VClusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
-			return err == nil
-		}).
-			WithPolling(pollingInterval).
-			WithTimeout(pollingDurationLong).
-			Should(gomega.BeTrue())
-
-		// check if secret is synced correctly
-		framework.ExpectEqual(len(vSecret.Data), 1)
-		framework.ExpectEqual(vSecret.Data["test"], []byte("test"))
-
-		// change secret
-		secret.Data["test"] = []byte("newtest")
-		err = f.HostCRClient.Update(f.Context, secret)
-		framework.ExpectNoError(err)
-
-		// wait for update
-		gomega.Eventually(func() bool {
-			err := f.VClusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
-			return err == nil && string(vSecret.Data["test"]) == "newtest"
-		}).
-			WithPolling(pollingInterval).
-			WithTimeout(pollingDurationLong).
-			Should(gomega.BeTrue())
-
-		// delete secret
-		err = f.HostCRClient.Delete(f.Context, secret)
-		framework.ExpectNoError(err)
-
-		// wait for delete within vCluster
-		gomega.Eventually(func() bool {
-			err := f.VClusterCRClient.Get(f.Context, types.NamespacedName{Name: "test", Namespace: "test"}, vSecret)
-			return kerrors.IsNotFound(err)
-		}).
-			WithPolling(pollingInterval).
-			WithTimeout(pollingDurationLong).
-			Should(gomega.BeTrue())
 	})
 
 	ginkgo.It("check the interceptor", func() {

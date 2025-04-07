@@ -65,18 +65,6 @@ jobs:
           labels: ${{ steps.docker_meta.outputs.labels }}
       - name: Images digests for bootstrap
         run: echo ${{ steps.docker_build_bootstrap.outputs.digest }}
-      - name: Build and push import secret
-        uses: docker/build-push-action@v6
-        id: docker_build_import_secret
-        with:
-          file: ./examples/import-secrets/Dockerfile
-          context: ./examples/import-secrets
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: "ghcr.io/loft-sh/vcluster-example-import-secrets:${{steps.get_version.outputs.release_version}}"
-          labels: ${{ steps.docker_meta.outputs.labels }}
-      - name: Images digests for import secret
-        run: echo ${{ steps.docker_build_import_secret.outputs.digest }}
       - name: Build and push crd sync
         uses: docker/build-push-action@v6
         id: docker_build_crd_sync
