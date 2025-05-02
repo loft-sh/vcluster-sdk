@@ -7,7 +7,7 @@ toolchain go1.23.3
 require (
 	github.com/ghodss/yaml v1.0.0
 	github.com/loft-sh/vcluster v0.24.0
-	github.com/loft-sh/vcluster-sdk v0.5.4-0.20250407055407-2956f7e01008
+	github.com/loft-sh/vcluster-sdk v0.5.4-0.20250407091100-e32283a027f4
 	k8s.io/apiextensions-apiserver v0.32.1
 	k8s.io/apimachinery v0.32.1
 	k8s.io/klog/v2 v2.130.1
