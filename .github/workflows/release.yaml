@@ -39,7 +39,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ secrets.DOCKER_USERNAME }}
+          username: loft-sh
           password: ${{ secrets.GH_ACCESS_TOKEN }}
       - name: Build and push the hooks
         uses: docker/build-push-action@v6
