@@ -39,7 +39,7 @@ jobs:
           go mod tidy
           go mod vendor
 
-          go run ./hack/bump-vcluster-dep.go
+          go run ./hack/bump-vcluster-dep.go "${RELEASE_TAG}"
 
           branch_name="upgrade-vcluster-to-${RELEASE_TAG}"
           git switch -c ${branch_name}
