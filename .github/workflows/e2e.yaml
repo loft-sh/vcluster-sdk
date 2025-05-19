@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VCLUSTER_VERSION: v0.24.0
+  VCLUSTER_VERSION: v0.25.0
   VCLUSTER_SUFFIX: vcluster
   VCLUSTER_NAME: vcluster
   VCLUSTER_NAMESPACE: vcluster
