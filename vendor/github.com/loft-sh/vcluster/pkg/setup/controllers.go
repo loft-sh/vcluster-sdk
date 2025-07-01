@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/loft-sh/vcluster/pkg/config"
+	"github.com/loft-sh/vcluster/pkg/constants"
 	"github.com/loft-sh/vcluster/pkg/controllers"
 	"github.com/loft-sh/vcluster/pkg/controllers/deploy"
 	"github.com/loft-sh/vcluster/pkg/controllers/resources/services"
@@ -21,6 +24,7 @@ import (
 	"github.com/loft-sh/vcluster/pkg/util/kubeconfig"
 	"github.com/loft-sh/vcluster/pkg/util/serviceaccount"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
+	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -55,29 +60,26 @@ func StartControllers(controllerContext *synccontext.ControllerContext, syncers 
 		return err
 	}
 
-	// start coredns & create syncers
-	if !controllerContext.Config.Experimental.SyncSettings.DisableSync {
-		// setup CoreDNS according to the manifest file
-		// skip this if both integrated and dedicated coredns
-		// deployments are explicitly disabled
-		go func() {
-			// apply coredns
-			ApplyCoreDNS(controllerContext)
+	// setup CoreDNS according to the manifest file
+	// skip this if both integrated and dedicated coredns
+	// deployments are explicitly disabled
+	go func() {
+		// apply coredns
+		ApplyCoreDNS(controllerContext)
 
-			// delete coredns deployment if integrated core dns
-			if controllerContext.Config.ControlPlane.CoreDNS.Embedded {
-				err := controllerContext.VirtualManager.GetClient().Delete(controllerContext.Context, &appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "coredns",
-						Namespace: "kube-system",
-					},
-				})
-				if err != nil && !kerrors.IsNotFound(err) {
-					klog.Errorf("Error deleting coredns deployment: %v", err)
-				}
+		// delete coredns deployment if integrated core dns
+		if controllerContext.Config.ControlPlane.CoreDNS.Embedded {
+			err := controllerContext.VirtualManager.GetClient().Delete(controllerContext.Context, &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "coredns",
+					Namespace: "kube-system",
+				},
+			})
+			if err != nil && !kerrors.IsNotFound(err) {
+				klog.Errorf("Error deleting coredns deployment: %v", err)
 			}
-		}()
-	}
+		}
+	}()
 
 	// sync remote Endpoints
 	if controllerContext.Config.Experimental.IsolatedControlPlane.KubeConfig != "" {
@@ -99,45 +101,22 @@ func StartControllers(controllerContext *synccontext.ControllerContext, syncers 
 		}
 	}
 
-	// sync endpoints for noop syncer
-	if controllerContext.Config.Experimental.SyncSettings.DisableSync && controllerContext.Config.Experimental.SyncSettings.RewriteKubernetesService {
-		err := pro.SyncNoopSyncerEndpoints(
-			controllerContext,
-			types.NamespacedName{
-				Namespace: controllerContext.Config.ControlPlaneNamespace,
-				Name:      controllerContext.Config.ControlPlaneService,
-			},
-			controlPlaneClient,
-			types.NamespacedName{
-				Namespace: controllerContext.Config.ControlPlaneNamespace,
-				Name:      controllerContext.Config.ControlPlaneService + "-proxy",
-			},
-			controllerContext.Config.ControlPlaneService,
-		)
-		if err != nil {
-			return errors.Wrap(err, "sync proxied cluster endpoints")
-		}
+	// migrate mappers
+	err = MigrateMappers(controllerContext.ToRegisterContext(), syncers)
+	if err != nil {
+		return err
 	}
 
-	// if not noop syncer
-	if !controllerContext.Config.Experimental.SyncSettings.DisableSync {
-		// migrate mappers
-		err = MigrateMappers(controllerContext.ToRegisterContext(), syncers)
-		if err != nil {
-			return err
-		}
+	// make sure the kubernetes service is synced
+	err = SyncKubernetesService(controllerContext)
+	if err != nil {
+		return errors.Wrap(err, "sync kubernetes service")
+	}
 
-		// make sure the kubernetes service is synced
-		err = SyncKubernetesService(controllerContext)
-		if err != nil {
-			return errors.Wrap(err, "sync kubernetes service")
-		}
-
-		// register controllers
-		err = controllers.RegisterControllers(controllerContext, syncers)
-		if err != nil {
-			return err
-		}
+	// register controllers
+	err = controllers.RegisterControllers(controllerContext, syncers)
+	if err != nil {
+		return err
 	}
 
 	// register pro controllers
@@ -184,6 +163,12 @@ func StartControllers(controllerContext *synccontext.ControllerContext, syncers 
 		return fmt.Errorf("failed to delete previouly synced resources: %w", err)
 	}
 
+	// ensure kubeadm setup
+	err = pro.StartPrivateNodesMode(controllerContext)
+	if err != nil {
+		return fmt.Errorf("ensure kubeadm setup: %w", err)
+	}
+
 	// we are done here
 	klog.FromContext(controllerContext).Info("Successfully started vCluster controllers")
 	return nil
@@ -207,7 +192,9 @@ func ApplyCoreDNS(controllerContext *synccontext.ControllerContext) {
 				}
 			}
 		}
-		err = coredns.ApplyManifest(ctx, controllerContext.Config.ControlPlane.Advanced.DefaultImageRegistry, controllerContext.VirtualManager.GetConfig(), controllerContext.VirtualClusterVersion)
+
+		// apply coredns manifests
+		err = coredns.ApplyManifest(ctx, &controllerContext.Config.Config, controllerContext.Config.ControlPlane.Advanced.DefaultImageRegistry, controllerContext.VirtualManager.GetConfig(), controllerContext.VirtualClusterVersion)
 		if err != nil {
 			if errors.Is(err, coredns.ErrNoCoreDNSManifests) {
 				klog.Infof("No CoreDNS manifests found, skipping CoreDNS configuration")
@@ -216,21 +203,28 @@ func ApplyCoreDNS(controllerContext *synccontext.ControllerContext) {
 			klog.Infof("Failed to apply CoreDNS configuration from the manifest file: %v", err)
 			return false, nil
 		}
+
 		klog.Infof("CoreDNS configuration from the manifest file applied successfully")
 		return true, nil
 	})
 }
 
 func SyncKubernetesService(ctx *synccontext.ControllerContext) error {
-	err := specialservices.SyncKubernetesService(
-		ctx.ToRegisterContext().ToSyncContext("sync-kubernetes-service"),
-		ctx.Config.WorkloadNamespace,
-		ctx.Config.WorkloadService,
-		types.NamespacedName{
-			Name:      specialservices.DefaultKubernetesSVCName,
-			Namespace: specialservices.DefaultKubernetesSVCNamespace,
-		},
-		services.TranslateServicePorts)
+	// don't sync kubernetes service in dedicated mode
+	var err error
+	if ctx.Config.PrivateNodes.Enabled {
+		err = pro.SyncKubernetesServiceDedicated(ctx.ToRegisterContext().ToSyncContext("sync-kubernetes-service"))
+	} else {
+		err = specialservices.SyncKubernetesService(
+			ctx.ToRegisterContext().ToSyncContext("sync-kubernetes-service"),
+			ctx.Config.WorkloadNamespace,
+			ctx.Config.WorkloadService,
+			types.NamespacedName{
+				Name:      specialservices.DefaultKubernetesSVCName,
+				Namespace: specialservices.DefaultKubernetesSVCNamespace,
+			},
+			services.TranslateServicePorts)
+	}
 	if err != nil {
 		if kerrors.IsConflict(err) {
 			klog.Errorf("Error syncing kubernetes service: %v", err)
@@ -316,6 +310,35 @@ func WriteKubeConfigToSecret(ctx context.Context, virtualConfig *rest.Config, cu
 	defaultKubeConfig, err := CreateVClusterKubeConfigForExport(ctx, virtualConfig, syncerConfig.DeepCopy(), createKubeConfigOptions)
 	if err != nil {
 		return fmt.Errorf("failed to create kubeconfig that is exported to the default kubeconfig secret: %w", err)
+	}
+
+	// if standalone mode is enabled, we don't need to write any kubeconfig secrets and instead write it to a file
+	if options.ControlPlane.Standalone.Enabled {
+		klog.FromContext(ctx).Info("Writing kubeconfig to", "path", filepath.Join(constants.DataDir, "kubeconfig.yaml"))
+		err = clientcmd.WriteToFile(*defaultKubeConfig, filepath.Join(constants.DataDir, "kubeconfig.yaml"))
+		if err != nil {
+			return fmt.Errorf("failed to write kubeconfig to file: %w", err)
+		}
+
+		// also check if we can write it to ~/.kube/config
+		home, err := homedir.Dir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+
+		homeKubeConfig := filepath.Join(home, ".kube", "config")
+		_, err = os.Stat(homeKubeConfig)
+		if err == nil {
+			// does exist so we skip writing it to the home kubeconfig
+			return nil
+		}
+
+		err = clientcmd.WriteToFile(*defaultKubeConfig, homeKubeConfig)
+		if err != nil {
+			return fmt.Errorf("failed to write kubeconfig to file: %w", err)
+		}
+
+		return nil
 	}
 	isIsolatedControlPlaneKubeConfigSet := options.Experimental.IsolatedControlPlane.KubeConfig != ""
 	err = kubeconfig.WriteKubeConfig(ctx, currentNamespaceClient, kubeconfig.GetDefaultSecretName(translate.VClusterName), currentNamespace, defaultKubeConfig, isIsolatedControlPlaneKubeConfigSet, options.Name)

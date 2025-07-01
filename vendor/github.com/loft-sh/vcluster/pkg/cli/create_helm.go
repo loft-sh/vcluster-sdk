@@ -33,6 +33,7 @@ import (
 	"github.com/loft-sh/vcluster/pkg/embed"
 	"github.com/loft-sh/vcluster/pkg/helm"
 	"github.com/loft-sh/vcluster/pkg/platform"
+	platformclihelper "github.com/loft-sh/vcluster/pkg/platform/clihelper"
 	"github.com/loft-sh/vcluster/pkg/snapshot"
 	"github.com/loft-sh/vcluster/pkg/snapshot/pod"
 	"github.com/loft-sh/vcluster/pkg/telemetry"
@@ -40,6 +41,7 @@ import (
 	"github.com/loft-sh/vcluster/pkg/util"
 	"github.com/loft-sh/vcluster/pkg/util/clihelper"
 	"github.com/loft-sh/vcluster/pkg/util/helmdownloader"
+	"github.com/loft-sh/vcluster/pkg/util/namespaces"
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -68,15 +70,16 @@ type CreateOptions struct {
 
 	KubernetesVersion string
 
-	CreateNamespace bool
-	UpdateCurrent   bool
-	BackgroundProxy bool
-	Add             bool
-	Expose          bool
-	ExposeLocal     bool
-	Restore         string
-	Connect         bool
-	Upgrade         bool
+	CreateNamespace      bool
+	UpdateCurrent        bool
+	BackgroundProxy      bool
+	BackgroundProxyImage string
+	Add                  bool
+	Expose               bool
+	ExposeLocal          bool
+	Restore              string
+	Connect              bool
+	Upgrade              bool
 
 	// Platform
 	Project         string
@@ -99,7 +102,7 @@ type CreateOptions struct {
 
 var CreatedByVClusterAnnotation = "vcluster.loft.sh/created"
 
-var AllowedDistros = []string{config.K8SDistro, config.K3SDistro, config.K0SDistro}
+var AllowedDistros = []string{config.K8SDistro, config.K3SDistro}
 
 type createHelm struct {
 	*flags.GlobalFlags
@@ -164,6 +167,13 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 		return fmt.Errorf("get current helm release: %w", err)
 	}
 
+	_, err = cmd.kubeClient.CoreV1().Services(globalFlags.Namespace).Get(ctx, platformclihelper.DefaultPlatformServiceName, metav1.GetOptions{})
+	if err == nil {
+		return fmt.Errorf("a vCluster platform installation exists in the namespace '%s'. Aborting install", globalFlags.Namespace)
+	} else if !kerrors.IsNotFound(err) {
+		return fmt.Errorf("get platform service: %w", err)
+	}
+
 	// check if vcluster already exists
 	if !cmd.Upgrade {
 		if isVClusterDeployed(release) {
@@ -180,6 +190,7 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 					UpdateCurrent:         true,
 					KubeConfigContextName: cmd.KubeConfigContextName,
 					KubeConfig:            "./kubeconfig.yaml",
+					BackgroundProxyImage:  cmd.BackgroundProxyImage,
 				}, cmd.GlobalFlags, vClusterName, nil, cmd.log)
 			}
 
@@ -226,6 +237,12 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 				}
 			}
 			if err := currentVClusterConfig.UnmarshalYAMLStrict([]byte(migratedValues)); err != nil {
+				return err
+			}
+		} else {
+			// When a vCluster is not legacy, there should be a config secret and we will fetch the values from the secret
+			currentVClusterConfig, err = getConfigfileFromSecret(ctx, vClusterName, cmd.Namespace)
+			if err != nil {
 				return err
 			}
 		}
@@ -300,9 +317,25 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 		return err
 	}
 
+	err = pkgconfig.ValidateSyncFromHostClasses(vClusterConfig.Sync.FromHost)
+	if err != nil {
+		return err
+	}
+
 	err = pkgconfig.ValidateAllSyncPatches(vClusterConfig.Sync)
 	if err != nil {
 		return err
+	}
+
+	warnings := pkgconfig.Lint(*vClusterConfig)
+	for _, warning := range warnings {
+		cmd.log.Warnf(warning)
+	}
+
+	if vClusterConfig.Sync.ToHost.Namespaces.Enabled {
+		if err := namespaces.ValidateNamespaceSyncConfig(vClusterConfig, vClusterName, cmd.Namespace); err != nil {
+			return err
+		}
 	}
 
 	if vClusterConfig.Experimental.IsolatedControlPlane.Headless {
@@ -325,11 +358,6 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 	verb := "created"
 	if isVClusterDeployed(release) {
 		verb = "upgraded"
-		currentVClusterConfig, err = getConfigfileFromSecret(ctx, vClusterName, cmd.Namespace)
-		if err != nil {
-			return err
-		}
-
 		// While certain backing store changes are allowed we prohibit changes to another distro.
 		if err := config.ValidateChanges(currentVClusterConfig, vClusterConfig); err != nil {
 			return err
@@ -359,6 +387,7 @@ func CreateHelm(ctx context.Context, options *CreateOptions, globalFlags *flags.
 			Print:                 cmd.Print,
 			KubeConfigContextName: cmd.KubeConfigContextName,
 			KubeConfig:            "./kubeconfig.yaml",
+			BackgroundProxyImage:  cmd.BackgroundProxyImage,
 		}, cmd.GlobalFlags, vClusterName, nil, cmd.log)
 	}
 
@@ -425,8 +454,8 @@ func (cmd *createHelm) parseVClusterYAML(chartValues string) (*config.Config, er
 
 		// TODO Delete after vCluster 0.19.x resp. the old config format is out of support.
 		// It also might be a legacy config, so we try to parse it as such.
-		// We cannot discriminate between k0s/k3s and eks/k8s. So we cannot prompt the actual values to convert, as this would cause false positives,
-		// because users are free to e.g. pass a k0s values file to a currently running k3s virtual cluster.
+		// We cannot discriminate between eks/k8s. So we cannot prompt the actual values to convert, as this would cause false positives,
+		// because users are free to e.g. pass a eks values file to a currently running k8s virtual cluster.
 		if isLegacyConfig([]byte(oldValues)) {
 			return nil, fmt.Errorf("it appears you are using a vCluster configuration using pre-v0.20 formatting. Please run %q to convert the values to the latest format", "vcluster convert config --distro <distro> -f /path/to/vcluster.yaml")
 		}
@@ -481,8 +510,8 @@ func isVClusterDeployed(release *helm.Release) bool {
 	return release != nil &&
 		release.Chart != nil &&
 		release.Chart.Metadata != nil &&
-		(release.Chart.Metadata.Name == "vcluster" || release.Chart.Metadata.Name == "vcluster-k0s" ||
-			release.Chart.Metadata.Name == "vcluster-k8s" || release.Chart.Metadata.Name == "vcluster-eks") &&
+		(release.Chart.Metadata.Name == "vcluster" || release.Chart.Metadata.Name == "vcluster-k8s" ||
+			release.Chart.Metadata.Name == "vcluster-eks") &&
 		release.Secret != nil &&
 		release.Secret.Labels != nil &&
 		release.Secret.Labels["status"] == "deployed"
@@ -507,7 +536,7 @@ func validateHABackingStoreCompatibility(config *config.Config) error {
 }
 
 func isLegacyConfig(values []byte) bool {
-	cfg := legacyconfig.LegacyK0sAndK3s{}
+	cfg := legacyconfig.LegacyK3s{}
 	if err := cfg.UnmarshalYAMLStrict(values); err != nil {
 		// Try to parse it as k8s/eks
 		cfg := legacyconfig.LegacyK8s{}
@@ -680,8 +709,8 @@ func (cmd *createHelm) ToChartOptions(kubernetesVersion *version.Info, log log.L
 
 	// check if we should create with node port
 	clusterType := localkubernetes.DetectClusterType(&cmd.rawConfig)
-	if cmd.ExposeLocal && clusterType.LocalKubernetes() {
-		cmd.log.Infof("Detected local kubernetes cluster %s. Will deploy vcluster with a NodePort & sync real nodes", clusterType)
+	if cmd.ExposeLocal && clusterType.LocalKubernetes() && clusterType != localkubernetes.ClusterTypeOrbstack {
+		cmd.log.Infof("Detected local kubernetes cluster %s. Will deploy vcluster with a NodePort", clusterType)
 		cmd.localCluster = true
 	}
 

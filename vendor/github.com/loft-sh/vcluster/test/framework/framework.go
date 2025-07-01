@@ -11,9 +11,12 @@ import (
 	"github.com/loft-sh/vcluster/cmd/vclusterctl/cmd"
 	"github.com/loft-sh/vcluster/pkg/cli"
 	"github.com/loft-sh/vcluster/pkg/cli/flags"
+	"github.com/loft-sh/vcluster/pkg/constants"
 	"github.com/loft-sh/vcluster/pkg/scheme"
+	"github.com/loft-sh/vcluster/pkg/upgrade"
 	logutil "github.com/loft-sh/vcluster/pkg/util/log"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
+	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -90,9 +93,6 @@ type Framework struct {
 
 	// ClientQPS value used in the clients
 	ClientQPS float32
-
-	// MultiNamespaceMode denotes whether the multi namespace mode is enabled for the virtualcluster
-	MultiNamespaceMode bool
 }
 
 func CreateFramework(ctx context.Context) error {
@@ -138,13 +138,7 @@ func CreateFramework(ctx context.Context) error {
 	}
 	translate.VClusterName = suffix
 
-	var multiNamespaceMode bool
-	if os.Getenv("MULTINAMESPACE_MODE") == "true" {
-		translate.Default = translate.NewMultiNamespaceTranslator(ns)
-		multiNamespaceMode = true
-	} else {
-		translate.Default = translate.NewSingleNamespaceTranslator(ns)
-	}
+	translate.Default = translate.NewSingleNamespaceTranslator(ns)
 
 	l.Infof("Testing vCluster named: %s in namespace: %s", name, ns)
 	hostConfig, err := ctrl.GetConfig()
@@ -167,24 +161,25 @@ func CreateFramework(ctx context.Context) error {
 
 	// create the framework
 	DefaultFramework = &Framework{
-		Context:            ctx,
-		VClusterName:       name,
-		VClusterNamespace:  ns,
-		Suffix:             suffix,
-		HostConfig:         hostConfig,
-		HostClient:         hostClient,
-		HostCRClient:       hostCRClient,
-		Log:                l,
-		ClientTimeout:      timeout,
-		ClientBurst:        clientBurst,
-		ClientQPS:          float32(clientQPS),
-		MultiNamespaceMode: multiNamespaceMode,
+		Context:           ctx,
+		VClusterName:      name,
+		VClusterNamespace: ns,
+		Suffix:            suffix,
+		HostConfig:        hostConfig,
+		HostClient:        hostClient,
+		HostCRClient:      hostCRClient,
+		Log:               l,
+		ClientTimeout:     timeout,
+		ClientBurst:       clientBurst,
+		ClientQPS:         float32(clientQPS),
 	}
 
 	// init virtual client
-	err = DefaultFramework.RefreshVirtualClient()
-	if err != nil {
-		return err
+	if os.Getenv("VCLUSTER_SKIP_CONNECT") != "true" {
+		err = DefaultFramework.RefreshVirtualClient()
+		if err != nil {
+			return err
+		}
 	}
 
 	l.Done("Framework successfully initialized")
@@ -200,15 +195,17 @@ func (f *Framework) RefreshVirtualClient() error {
 
 	// vKubeConfigFile removal is done in the Framework.Cleanup() which gets called in ginkgo's AfterSuite()
 	connectCmd := cmd.ConnectCmd{
-		Log: f.Log,
+		CobraCmd: &cobra.Command{},
+		Log:      f.Log,
 		GlobalFlags: &flags.GlobalFlags{
 			Namespace: f.VClusterNamespace,
 			Debug:     true,
 		},
 		ConnectOptions: cli.ConnectOptions{
-			KubeConfig:      vKubeconfigFile.Name(),
-			LocalPort:       14550, // choosing a port that usually should be unused
-			BackgroundProxy: true,
+			KubeConfig:           vKubeconfigFile.Name(),
+			LocalPort:            14550, // choosing a port that usually should be unused
+			BackgroundProxy:      true,
+			BackgroundProxyImage: constants.DefaultBackgroundProxyImage(upgrade.GetVersion()),
 		},
 	}
 	err = connectCmd.Run(f.Context, []string{f.VClusterName})

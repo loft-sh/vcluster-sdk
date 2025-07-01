@@ -13,6 +13,13 @@ github.com/Azure/go-ansiterm/winterm
 # github.com/MakeNowJust/heredoc v1.0.0
 ## explicit; go 1.12
 github.com/MakeNowJust/heredoc
+# github.com/Microsoft/go-winio v0.6.2
+## explicit; go 1.21
+github.com/Microsoft/go-winio
+github.com/Microsoft/go-winio/internal/fs
+github.com/Microsoft/go-winio/internal/socket
+github.com/Microsoft/go-winio/internal/stringbuffer
+github.com/Microsoft/go-winio/pkg/guid
 # github.com/NYTimes/gziphandler v1.1.1
 ## explicit; go 1.11
 github.com/NYTimes/gziphandler
@@ -205,8 +212,8 @@ github.com/chai2010/gettext-go
 github.com/chai2010/gettext-go/mo
 github.com/chai2010/gettext-go/plural
 github.com/chai2010/gettext-go/po
-# github.com/cloudflare/circl v1.3.7
-## explicit; go 1.19
+# github.com/cloudflare/circl v1.6.1
+## explicit; go 1.22.0
 github.com/cloudflare/circl/dh/x25519
 github.com/cloudflare/circl/dh/x448
 github.com/cloudflare/circl/ecc/goldilocks
@@ -236,6 +243,9 @@ github.com/davecgh/go-spew/spew
 # github.com/denisbrodbeck/machineid v1.0.1
 ## explicit
 github.com/denisbrodbeck/machineid
+# github.com/distribution/reference v0.6.0
+## explicit; go 1.20
+github.com/distribution/reference
 # github.com/docker/cli v27.5.0+incompatible
 ## explicit
 github.com/docker/cli/cli/config
@@ -248,10 +258,14 @@ github.com/docker/distribution/registry/client/auth/challenge
 # github.com/docker/docker v27.5.0+incompatible
 ## explicit
 github.com/docker/docker/pkg/homedir
+github.com/docker/docker/pkg/jsonmessage
 # github.com/docker/docker-credential-helpers v0.8.2
 ## explicit; go 1.19
 github.com/docker/docker-credential-helpers/client
 github.com/docker/docker-credential-helpers/credentials
+# github.com/docker/go-units v0.5.0
+## explicit
+github.com/docker/go-units
 # github.com/dprotaso/go-yit v0.0.0-20191028211022-135eb7262960
 ## explicit; go 1.13
 github.com/dprotaso/go-yit
@@ -378,6 +392,7 @@ github.com/google/go-containerregistry/pkg/logs
 github.com/google/go-containerregistry/pkg/name
 github.com/google/go-containerregistry/pkg/v1
 github.com/google/go-containerregistry/pkg/v1/empty
+github.com/google/go-containerregistry/pkg/v1/layout
 github.com/google/go-containerregistry/pkg/v1/match
 github.com/google/go-containerregistry/pkg/v1/mutate
 github.com/google/go-containerregistry/pkg/v1/partial
@@ -483,11 +498,14 @@ github.com/kylelemons/godebug/diff
 # github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 ## explicit
 github.com/liggitt/tabwriter
-# github.com/loft-sh/admin-apis v0.0.0-20240203010124-3600c1c582a8
+# github.com/lithammer/dedent v1.1.0
+## explicit
+github.com/lithammer/dedent
+# github.com/loft-sh/admin-apis v0.0.0-20250429193833-4e0a455c33dd
 ## explicit; go 1.21.1
 github.com/loft-sh/admin-apis/pkg/licenseapi
-# github.com/loft-sh/agentapi/v4 v4.0.0-alpha.6.0.20240614131646-3359da6a4818
-## explicit; go 1.22.4
+# github.com/loft-sh/agentapi/v4 v4.3.0-alpha.39
+## explicit; go 1.23.1
 github.com/loft-sh/agentapi/v4/pkg/apis/loft/cluster
 github.com/loft-sh/agentapi/v4/pkg/apis/loft/cluster/v1
 github.com/loft-sh/agentapi/v4/pkg/apis/loft/storage/v1
@@ -498,8 +516,8 @@ github.com/loft-sh/agentapi/v4/pkg/clientset/versioned/typed/storage/v1
 # github.com/loft-sh/analytics-client v0.0.0-20240219162240-2f4c64b2494e
 ## explicit; go 1.21
 github.com/loft-sh/analytics-client/client
-# github.com/loft-sh/api/v4 v4.0.0-alpha.6.0.20240614134907-f9ecc1668e9e
-## explicit; go 1.22.4
+# github.com/loft-sh/api/v4 v4.3.0-alpha.32
+## explicit; go 1.23.1
 github.com/loft-sh/api/v4/pkg/apis/audit/v1
 github.com/loft-sh/api/v4/pkg/apis/management
 github.com/loft-sh/api/v4/pkg/apis/management/v1
@@ -515,8 +533,8 @@ github.com/loft-sh/api/v4/pkg/clientset/versioned/typed/storage/v1
 github.com/loft-sh/api/v4/pkg/clientset/versioned/typed/virtualcluster/v1
 github.com/loft-sh/api/v4/pkg/managerfactory
 github.com/loft-sh/api/v4/pkg/product
-# github.com/loft-sh/apiserver v0.0.0-20240607231110-634aeeab2b36
-## explicit; go 1.22.4
+# github.com/loft-sh/apiserver v0.0.0-20250206205835-422f1d472459
+## explicit; go 1.23.1
 github.com/loft-sh/apiserver/pkg/builders
 # github.com/loft-sh/log v0.0.0-20240219160058-26d83ffb46ac
 ## explicit; go 1.20
@@ -534,12 +552,13 @@ github.com/loft-sh/utils/pkg/command
 github.com/loft-sh/utils/pkg/downloader
 github.com/loft-sh/utils/pkg/downloader/commands
 github.com/loft-sh/utils/pkg/extract
-# github.com/loft-sh/vcluster v0.25.0
+# github.com/loft-sh/vcluster v0.26.0
 ## explicit; go 1.24
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/convert
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/credits
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/debug
+github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/node
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/add
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/backup
@@ -552,7 +571,9 @@ github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/set
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/share
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/sleep
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/platform/wakeup
+github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/registry
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/telemetry
+github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/token
 github.com/loft-sh/vcluster/cmd/vclusterctl/cmd/use
 github.com/loft-sh/vcluster/config
 github.com/loft-sh/vcluster/config/legacyconfig
@@ -605,6 +626,7 @@ github.com/loft-sh/vcluster/pkg/controllers/resources/persistentvolumeclaims
 github.com/loft-sh/vcluster/pkg/controllers/resources/persistentvolumes
 github.com/loft-sh/vcluster/pkg/controllers/resources/poddisruptionbudgets
 github.com/loft-sh/vcluster/pkg/controllers/resources/pods
+github.com/loft-sh/vcluster/pkg/controllers/resources/pods/scheduling
 github.com/loft-sh/vcluster/pkg/controllers/resources/pods/token
 github.com/loft-sh/vcluster/pkg/controllers/resources/pods/translate
 github.com/loft-sh/vcluster/pkg/controllers/resources/priorityclasses
@@ -622,10 +644,10 @@ github.com/loft-sh/vcluster/pkg/docker
 github.com/loft-sh/vcluster/pkg/embed
 github.com/loft-sh/vcluster/pkg/etcd
 github.com/loft-sh/vcluster/pkg/helm
-github.com/loft-sh/vcluster/pkg/k0s
 github.com/loft-sh/vcluster/pkg/k3s
 github.com/loft-sh/vcluster/pkg/k8s
 github.com/loft-sh/vcluster/pkg/kube
+github.com/loft-sh/vcluster/pkg/kubeadm
 github.com/loft-sh/vcluster/pkg/lifecycle
 github.com/loft-sh/vcluster/pkg/log
 github.com/loft-sh/vcluster/pkg/mappings
@@ -675,11 +697,13 @@ github.com/loft-sh/vcluster/pkg/telemetry
 github.com/loft-sh/vcluster/pkg/upgrade
 github.com/loft-sh/vcluster/pkg/util
 github.com/loft-sh/vcluster/pkg/util/applier
+github.com/loft-sh/vcluster/pkg/util/archive
 github.com/loft-sh/vcluster/pkg/util/base36
 github.com/loft-sh/vcluster/pkg/util/blockingcacheclient
 github.com/loft-sh/vcluster/pkg/util/certhelper
 github.com/loft-sh/vcluster/pkg/util/clienthelper
 github.com/loft-sh/vcluster/pkg/util/clihelper
+github.com/loft-sh/vcluster/pkg/util/command
 github.com/loft-sh/vcluster/pkg/util/commandwriter
 github.com/loft-sh/vcluster/pkg/util/compress
 github.com/loft-sh/vcluster/pkg/util/encoding
@@ -688,6 +712,7 @@ github.com/loft-sh/vcluster/pkg/util/http
 github.com/loft-sh/vcluster/pkg/util/kubeconfig
 github.com/loft-sh/vcluster/pkg/util/log
 github.com/loft-sh/vcluster/pkg/util/loghelper
+github.com/loft-sh/vcluster/pkg/util/namespaces
 github.com/loft-sh/vcluster/pkg/util/patch
 github.com/loft-sh/vcluster/pkg/util/pluginhookclient
 github.com/loft-sh/vcluster/pkg/util/podhelper
@@ -746,6 +771,9 @@ github.com/modern-go/reflect2
 # github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00
 ## explicit
 github.com/monochromegane/go-gitignore
+# github.com/morikuni/aec v1.0.0
+## explicit
+github.com/morikuni/aec
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
@@ -810,7 +838,7 @@ github.com/peterbourgon/diskv
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
-# github.com/prometheus/client_golang v1.20.4
+# github.com/prometheus/client_golang v1.20.5
 ## explicit; go 1.20
 github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
 github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil/header
@@ -1009,7 +1037,7 @@ golang.org/x/crypto/openpgp/packet
 golang.org/x/crypto/openpgp/s2k
 golang.org/x/crypto/salsa20/salsa
 golang.org/x/crypto/sha3
-# golang.org/x/exp v0.0.0-20241004190924-225e2abe05e6
+# golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8
 ## explicit; go 1.22.0
 golang.org/x/exp/constraints
 golang.org/x/exp/maps
@@ -1051,6 +1079,8 @@ golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
+golang.org/x/sys/windows/svc
+golang.org/x/sys/windows/svc/mgr
 # golang.org/x/term v0.30.0
 ## explicit; go 1.23.0
 golang.org/x/term
@@ -1086,7 +1116,7 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/width
-# golang.org/x/time v0.7.0
+# golang.org/x/time v0.9.0
 ## explicit; go 1.18
 golang.org/x/time/rate
 # golang.org/x/tools v0.29.0
@@ -1359,6 +1389,7 @@ k8s.io/apimachinery/pkg/runtime/serializer/protobuf
 k8s.io/apimachinery/pkg/runtime/serializer/recognizer
 k8s.io/apimachinery/pkg/runtime/serializer/streaming
 k8s.io/apimachinery/pkg/runtime/serializer/versioning
+k8s.io/apimachinery/pkg/runtime/serializer/yaml
 k8s.io/apimachinery/pkg/selection
 k8s.io/apimachinery/pkg/types
 k8s.io/apimachinery/pkg/util/cache
@@ -1924,6 +1955,11 @@ k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/watchlist
 k8s.io/client-go/util/workqueue
+# k8s.io/cluster-bootstrap v0.32.1
+## explicit; go 1.23.0
+k8s.io/cluster-bootstrap/token/api
+k8s.io/cluster-bootstrap/token/util
+k8s.io/cluster-bootstrap/util/secrets
 # k8s.io/code-generator v0.32.1
 ## explicit; go 1.23.0
 k8s.io/code-generator
@@ -1963,11 +1999,14 @@ k8s.io/code-generator/third_party/forked/golang/reflect
 # k8s.io/component-base v0.32.1
 ## explicit; go 1.23.0
 k8s.io/component-base/cli/flag
+k8s.io/component-base/config
+k8s.io/component-base/config/v1alpha1
 k8s.io/component-base/featuregate
 k8s.io/component-base/logs
 k8s.io/component-base/logs/api/v1
 k8s.io/component-base/logs/internal/setverbositylevel
 k8s.io/component-base/logs/klogflags
+k8s.io/component-base/logs/logreduction
 k8s.io/component-base/metrics
 k8s.io/component-base/metrics/features
 k8s.io/component-base/metrics/legacyregistry
@@ -1982,7 +2021,17 @@ k8s.io/component-base/version
 k8s.io/component-base/zpages/flagz
 # k8s.io/component-helpers v0.32.1
 ## explicit; go 1.23.0
+k8s.io/component-helpers/node/util
 k8s.io/component-helpers/storage/ephemeral
+# k8s.io/cri-api v0.32.1
+## explicit; go 1.23.0
+k8s.io/cri-api/pkg/apis
+k8s.io/cri-api/pkg/apis/runtime/v1
+# k8s.io/cri-client v0.32.1
+## explicit; go 1.23.0
+k8s.io/cri-client/pkg
+k8s.io/cri-client/pkg/internal
+k8s.io/cri-client/pkg/util
 # k8s.io/gengo/v2 v2.0.0-20240911193312-2b36238f13e9
 ## explicit; go 1.20
 k8s.io/gengo/v2
@@ -2068,6 +2117,9 @@ k8s.io/kube-openapi/pkg/validation/errors
 k8s.io/kube-openapi/pkg/validation/spec
 k8s.io/kube-openapi/pkg/validation/strfmt
 k8s.io/kube-openapi/pkg/validation/strfmt/bson
+# k8s.io/kube-proxy v0.32.1
+## explicit; go 1.23.0
+k8s.io/kube-proxy/config/v1alpha1
 # k8s.io/kubectl v0.32.1
 ## explicit; go 1.23.0
 k8s.io/kubectl/pkg/apps
@@ -2081,6 +2133,7 @@ k8s.io/kubectl/pkg/cmd/util/editor/crlf
 k8s.io/kubectl/pkg/cmd/util/podcmd
 k8s.io/kubectl/pkg/cmd/wait
 k8s.io/kubectl/pkg/describe
+k8s.io/kubectl/pkg/drain
 k8s.io/kubectl/pkg/polymorphichelpers
 k8s.io/kubectl/pkg/rawhttp
 k8s.io/kubectl/pkg/scheme
@@ -2105,7 +2158,34 @@ k8s.io/kubectl/pkg/util/term
 k8s.io/kubectl/pkg/validation
 # k8s.io/kubelet v0.32.1
 ## explicit; go 1.23.0
+k8s.io/kubelet/config/v1beta1
 k8s.io/kubelet/pkg/apis/stats/v1alpha1
+# k8s.io/kubernetes v1.32.1
+## explicit; go 1.23.0
+k8s.io/kubernetes/cmd/kubeadm/app/apis/bootstraptoken/v1
+k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm
+k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/scheme
+k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta3
+k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta4
+k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/validation
+k8s.io/kubernetes/cmd/kubeadm/app/apis/output
+k8s.io/kubernetes/cmd/kubeadm/app/apis/output/v1alpha3
+k8s.io/kubernetes/cmd/kubeadm/app/cmd/options
+k8s.io/kubernetes/cmd/kubeadm/app/componentconfigs
+k8s.io/kubernetes/cmd/kubeadm/app/constants
+k8s.io/kubernetes/cmd/kubeadm/app/features
+k8s.io/kubernetes/cmd/kubeadm/app/phases/certs
+k8s.io/kubernetes/cmd/kubeadm/app/phases/kubeconfig
+k8s.io/kubernetes/cmd/kubeadm/app/util
+k8s.io/kubernetes/cmd/kubeadm/app/util/apiclient
+k8s.io/kubernetes/cmd/kubeadm/app/util/config
+k8s.io/kubernetes/cmd/kubeadm/app/util/config/strict
+k8s.io/kubernetes/cmd/kubeadm/app/util/initsystem
+k8s.io/kubernetes/cmd/kubeadm/app/util/kubeconfig
+k8s.io/kubernetes/cmd/kubeadm/app/util/output
+k8s.io/kubernetes/cmd/kubeadm/app/util/pkiutil
+k8s.io/kubernetes/cmd/kubeadm/app/util/pubkeypin
+k8s.io/kubernetes/cmd/kubeadm/app/util/runtime
 # k8s.io/metrics v0.32.1
 ## explicit; go 1.23.0
 k8s.io/metrics/pkg/apis/metrics

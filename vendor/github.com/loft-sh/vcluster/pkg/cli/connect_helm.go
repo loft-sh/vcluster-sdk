@@ -45,6 +45,7 @@ type ConnectOptions struct {
 	Server                    string
 	KubeConfig                string
 	ServiceAccount            string
+	BackgroundProxyImage      string
 	LocalPort                 int
 	ServiceAccountExpiration  int
 	Print                     bool
@@ -350,7 +351,7 @@ func (cmd *connectHelm) getVClusterKubeConfig(ctx context.Context, vclusterName 
 		if cmd.Server == "" && cmd.BackgroundProxy {
 			if localkubernetes.IsDockerInstalledAndUpAndRunning() {
 				// start background container
-				cmd.Server, err = localkubernetes.CreateBackgroundProxyContainer(ctx, vclusterName, cmd.Namespace, cmd.kubeClientConfig, cmd.LocalPort, cmd.Log)
+				cmd.Server, err = localkubernetes.CreateBackgroundProxyContainer(ctx, vclusterName, cmd.Namespace, cmd.BackgroundProxyImage, cmd.kubeClientConfig, cmd.LocalPort, cmd.Log)
 				if err != nil {
 					cmd.Log.Warnf("Error exposing local vcluster, will fallback to port-forwarding: %v", err)
 					cmd.BackgroundProxy = false
@@ -392,7 +393,10 @@ func (cmd *connectHelm) getVClusterKubeConfig(ctx context.Context, vclusterName 
 		}
 	}
 
-	// start port forwarding
+	// start port forwarding if:
+	// * we want to have a service account token
+	// * we still don't have a server (means background proxy has failed or is disabled)
+	// * we have a command to execute
 	if cmd.ServiceAccount != "" || cmd.Server == "" || len(command) > 0 {
 		cmd.portForwarding = true
 		cmd.interruptChan = make(chan struct{})
@@ -401,7 +405,7 @@ func (cmd *connectHelm) getVClusterKubeConfig(ctx context.Context, vclusterName 
 		// silence port-forwarding if a command is used
 		stdout := io.Writer(os.Stdout)
 		stderr := io.Writer(os.Stderr)
-		if len(command) > 0 || cmd.BackgroundProxy {
+		if len(command) > 0 || cmd.BackgroundProxy || cmd.Silent {
 			stdout = io.Discard
 			stderr = io.Discard
 		}
@@ -413,7 +417,15 @@ func (cmd *connectHelm) getVClusterKubeConfig(ctx context.Context, vclusterName 
 
 	// we want to use a service account token in the kube config
 	if cmd.ServiceAccount != "" {
-		vKubeClient, serviceAccount, serviceAccountNamespace, err := getServiceAccountClientAndName(*kubeConfig, cmd.ConnectOptions)
+		// change kubeconfig to use the port forwarding address
+		saKubeConfig := *kubeConfig.DeepCopy()
+		for k := range saKubeConfig.Clusters {
+			saKubeConfig.Clusters[k].Server = "https://localhost:" + strconv.Itoa(cmd.LocalPort)
+			saKubeConfig.Clusters[k].InsecureSkipTLSVerify = true
+			saKubeConfig.Clusters[k].CertificateAuthorityData = nil
+		}
+
+		vKubeClient, serviceAccount, serviceAccountNamespace, err := getServiceAccountClientAndName(saKubeConfig, cmd.ConnectOptions)
 		if err != nil {
 			return nil, err
 		}

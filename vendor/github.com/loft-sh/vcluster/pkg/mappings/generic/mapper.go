@@ -110,8 +110,12 @@ func TryToTranslateBackByAnnotations(ctx *synccontext.SyncContext, req types.Nam
 
 	// exclude objects that are from other vClusters
 	markerLabel := pObj.GetLabels()[translate.MarkerLabel]
-	if markerLabel != "" && markerLabel != translate.VClusterName {
-		return types.NamespacedName{}
+	if markerLabel != "" {
+		if pObj.GetNamespace() != "" && markerLabel != translate.VClusterName {
+			return types.NamespacedName{}
+		} else if pObj.GetNamespace() == "" && markerLabel != translate.Default.MarkerLabelCluster() {
+			return types.NamespacedName{}
+		}
 	}
 
 	// make sure kind matches
@@ -150,7 +154,7 @@ func TryToTranslateBackByName(ctx *synccontext.SyncContext, req types.Namespaced
 	}
 
 	// if multi-namespace mode we try to translate back
-	if ctx.Config.Experimental.MultiNamespaceMode.Enabled {
+	if ctx.Config.Sync.ToHost.Namespaces.Enabled {
 		if gvk == mappings.Namespaces() || !ctx.Mappings.Has(mappings.Namespaces()) {
 			return types.NamespacedName{}
 		}
