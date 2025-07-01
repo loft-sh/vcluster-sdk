@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/constants"
+	"github.com/loft-sh/vcluster/pkg/util/namespaces"
 	"github.com/loft-sh/vcluster/pkg/util/toleration"
 )
 
@@ -40,12 +42,12 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 	}
 
 	// check if enable scheduler works correctly
-	if vConfig.ControlPlane.Advanced.VirtualScheduler.Enabled && !vConfig.Sync.FromHost.Nodes.Selector.All && len(vConfig.Sync.FromHost.Nodes.Selector.Labels) == 0 {
+	if vConfig.SchedulingInVirtualClusterEnabled() && !vConfig.Sync.FromHost.Nodes.Selector.All && len(vConfig.Sync.FromHost.Nodes.Selector.Labels) == 0 {
 		vConfig.Sync.FromHost.Nodes.Selector.All = true
 	}
 
 	// enable additional controllers required for scheduling with storage
-	if vConfig.ControlPlane.Advanced.VirtualScheduler.Enabled && vConfig.Sync.ToHost.PersistentVolumeClaims.Enabled {
+	if vConfig.SchedulingInVirtualClusterEnabled() && vConfig.Sync.ToHost.PersistentVolumeClaims.Enabled {
 		if vConfig.Sync.FromHost.CSINodes.Enabled == "auto" {
 			vConfig.Sync.FromHost.CSINodes.Enabled = "true"
 		}
@@ -112,8 +114,8 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 	}
 
 	// check if nodes controller needs to be enabled
-	if vConfig.ControlPlane.Advanced.VirtualScheduler.Enabled && !vConfig.Sync.FromHost.Nodes.Enabled {
-		return errors.New("sync.fromHost.nodes.enabled is false, but required if using virtual scheduler")
+	if vConfig.SchedulingInVirtualClusterEnabled() && !vConfig.Sync.FromHost.Nodes.Enabled {
+		return errors.New("sync.fromHost.nodes.enabled is false, but required if using hybrid scheduling or virtual scheduler")
 	}
 
 	// check if storage classes and host storage classes are enabled at the same time
@@ -151,11 +153,6 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 		return err
 	}
 
-	err = validateK0sAndNoExperimentalKubeconfig(vConfig)
-	if err != nil {
-		return err
-	}
-
 	// check deny proxy requests
 	for _, c := range vConfig.Experimental.DenyProxyRequests {
 		err := validateCheck(c)
@@ -181,6 +178,23 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 		return err
 	}
 
+	if isUsingOldGenericSync(vConfig.Experimental.GenericSync) && vConfig.Sync.ToHost.Namespaces.Enabled {
+		return errors.New("experimental.genericSync.imports is not allowed when using sync.toHost.namespaces")
+	}
+
+	// sync.toHost.namespaces validation
+	err = namespaces.ValidateNamespaceSyncConfig(&vConfig.Config, vConfig.Name, vConfig.ControlPlaneNamespace)
+	if err != nil {
+		return fmt.Errorf("namespace sync: %w", err)
+	}
+
+	// if we're runnign in with namespace sync enabled, we want to sync all objects.
+	// otherwise, objects created on host in synced namespaces won't get imported into vCluster.
+	if vConfig.Sync.ToHost.Namespaces.Enabled {
+		vConfig.Sync.ToHost.Secrets.All = true
+		vConfig.Sync.ToHost.ConfigMaps.All = true
+	}
+
 	// set service name
 	if vConfig.ControlPlane.Advanced.WorkloadServiceAccount.Name == "" {
 		vConfig.ControlPlane.Advanced.WorkloadServiceAccount.Name = "vc-workload-" + vConfig.Name
@@ -194,6 +208,18 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 
 	// pro validate config
 	err = ProValidateConfig(vConfig)
+	if err != nil {
+		return err
+	}
+
+	// validate dedicated nodes mode
+	err = validatePrivatedNodesMode(vConfig)
+	if err != nil {
+		return err
+	}
+
+	// validate sync.fromHost classes
+	err = ValidateSyncFromHostClasses(vConfig.Config.Sync.FromHost)
 	if err != nil {
 		return err
 	}
@@ -217,6 +243,7 @@ func ValidateAllSyncPatches(sync config.Sync) error {
 			{"sync.toHost.pods", sync.ToHost.Pods.Patches},
 			{"sync.toHost.serviceAccounts", sync.ToHost.ServiceAccounts.Patches},
 			{"sync.toHost.ingresses", sync.ToHost.Ingresses.Patches},
+			{"sync.toHost.namespaces", sync.ToHost.Namespaces.Patches},
 			{"sync.toHost.networkPolicies", sync.ToHost.NetworkPolicies.Patches},
 			{"sync.toHost.persistentVolumeClaims", sync.ToHost.PersistentVolumeClaims.Patches},
 			{"sync.toHost.persistentVolumes", sync.ToHost.PersistentVolumes.Patches},
@@ -271,12 +298,31 @@ func validatePatches(patchesValidation ...patchesValidation) error {
 	return nil
 }
 
+func ValidateSyncFromHostClasses(fromHost config.SyncFromHost) error {
+	errorFn := func(sls config.StandardLabelSelector, path string) error {
+		if _, err := sls.ToSelector(); err != nil {
+			return fmt.Errorf("invalid sync.fromHost.%s.selector: %w", path, err)
+		}
+		return nil
+	}
+	if err := errorFn(fromHost.RuntimeClasses.Selector, "runtimeClasses"); err != nil {
+		return err
+	}
+	if err := errorFn(fromHost.IngressClasses.Selector, "ingressClasses"); err != nil {
+		return err
+	}
+	if err := errorFn(fromHost.PriorityClasses.Selector, "priorityClasses"); err != nil {
+		return err
+	}
+	if err := errorFn(fromHost.StorageClasses.Selector, "storageClasses"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validateDistro(config *VirtualClusterConfig) error {
 	enabledDistros := 0
 	if config.ControlPlane.Distro.K3S.Enabled {
-		enabledDistros++
-	}
-	if config.ControlPlane.Distro.K0S.Enabled {
 		enabledDistros++
 	}
 	if config.ControlPlane.Distro.K8S.Enabled {
@@ -604,16 +650,9 @@ func validateWildcardOrAny(values []string) error {
 	return nil
 }
 
-func validateK0sAndNoExperimentalKubeconfig(c *VirtualClusterConfig) error {
-	if c.Distro() != config.K0SDistro {
-		return nil
-	}
-	virtualclusterconfig := c.Experimental.VirtualClusterKubeConfig
-	empty := config.VirtualClusterKubeConfig{}
-	if virtualclusterconfig != empty {
-		return errors.New("config.experimental.VirtualClusterConfig cannot be set for k0s")
-	}
-	return nil
+func isUsingOldGenericSync(genericSync config.ExperimentalGenericSync) bool {
+	return len(genericSync.Exports) > 0 || len(genericSync.Imports) > 0 ||
+		(genericSync.Hooks != nil && (len(genericSync.Hooks.HostToVirtual) > 0 || len(genericSync.Hooks.VirtualToHost) > 0))
 }
 
 func validateFromHostSyncMappings(s config.EnableSwitchWithResourcesMappings, resourceNamePlural string) error {
@@ -833,6 +872,68 @@ func validateKubeVirtEnabled(
 
 func isIn(crdName string, s ...string) bool {
 	return slices.Contains(s, crdName)
+}
+
+func validatePrivatedNodesMode(vConfig *VirtualClusterConfig) error {
+	if !vConfig.PrivateNodes.Enabled {
+		if vConfig.ControlPlane.Endpoint != "" {
+			return fmt.Errorf("endpoint is only supported in private nodes mode")
+		}
+
+		return nil
+	}
+
+	// validate endpoint
+	if vConfig.ControlPlane.Endpoint != "" {
+		_, _, err := net.SplitHostPort(vConfig.ControlPlane.Endpoint)
+		if err != nil {
+			return fmt.Errorf("invalid endpoint %s: %w", vConfig.ControlPlane.Endpoint, err)
+		}
+	}
+
+	// integrations are not supported in private nodes mode
+	if vConfig.Integrations.MetricsServer.Enabled {
+		return fmt.Errorf("metrics-server integration is not supported in private nodes mode")
+	}
+	if vConfig.Integrations.CertManager.Enabled {
+		return fmt.Errorf("cert-manager integration is not supported in private nodes mode")
+	}
+	if vConfig.Integrations.ExternalSecrets.Enabled {
+		return fmt.Errorf("external-secrets integration is not supported in private nodes mode")
+	}
+	if vConfig.Integrations.Istio.Enabled {
+		return fmt.Errorf("istio integration is not supported in private nodes mode")
+	}
+	if vConfig.Integrations.KubeVirt.Enabled {
+		return fmt.Errorf("kubevirt integration is not supported in private nodes mode")
+	}
+
+	// embedded coredns is not supported in private nodes mode
+	if vConfig.ControlPlane.CoreDNS.Embedded {
+		return fmt.Errorf("coredns is not supported in private nodes mode")
+	}
+
+	// host path mapper is not supported in private nodes mode
+	if vConfig.ControlPlane.HostPathMapper.Enabled {
+		return fmt.Errorf("host path mapper is not supported in private nodes mode")
+	}
+
+	// multi-namespace mode is not supported in private nodes mode
+	if vConfig.Sync.ToHost.Namespaces.Enabled {
+		return fmt.Errorf("multi-namespace mode is not supported in private nodes mode")
+	}
+
+	// isolated control plane is not supported in dedicated mode
+	if vConfig.Experimental.IsolatedControlPlane.Enabled {
+		return fmt.Errorf("isolated control plane is not supported in private nodes mode")
+	}
+
+	// dedicated mode is only supported for kubernetes distro
+	if vConfig.Distro() != config.K8SDistro {
+		return fmt.Errorf("private nodes mode is only supported for kubernetes")
+	}
+
+	return nil
 }
 
 var ProValidateConfig = func(_ *VirtualClusterConfig) error {

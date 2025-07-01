@@ -33,13 +33,14 @@ import (
 
 const (
 	LoftDirectClusterEndpointCaData = "loft.sh/direct-cluster-endpoint-ca-data"
-	VersionPath                     = "%s/version"
-	LoginPath                       = "%s/login?cli=true"
-	RedirectPath                    = "%s/spaces"
-	AccessKeyPath                   = "%s/profile/access-keys"
-	ConfigFileName                  = "platform.json"
-	RefreshToken                    = time.Minute * 30
-	CacheFolder                     = ".vcluster"
+
+	VersionPath    = "%s/version"
+	LoginPath      = "%s/login?cli=true"
+	RedirectPath   = "%s/spaces"
+	AccessKeyPath  = "%s/profile/access-keys"
+	ConfigFileName = "platform.json"
+	RefreshToken   = time.Minute * 30
+	CacheFolder    = ".vcluster"
 )
 
 var (
@@ -378,7 +379,12 @@ func (c *client) restConfig(hostSuffix string) (*rest.Config, error) {
 	if c.config == nil {
 		return nil, perrors.New("no config loaded")
 	} else if c.config.Platform.Host == "" || c.config.Platform.AccessKey == "" {
-		return nil, perrors.New(fmt.Sprintf("not logged in, please make sure you have run '%s' to create one or '%s [%s]' if one already exists", product.StartCmd(), product.LoginCmd(), product.Url()))
+		return nil, perrors.New(fmt.Sprintf(
+			"not logged in – run '%s' to create a client, or if one already exists, log in with '%s [%s]' or '%s --access-key <key>'",
+			product.StartCmd(),
+			product.LoginCmd(), product.Url(),
+			product.LoginCmd(),
+		))
 	}
 
 	// build a rest config

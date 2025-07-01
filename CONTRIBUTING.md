@@ -24,21 +24,33 @@ It is important to state that you retain copyright for your contributions, but a
 
 ## Upgrading vCluster Dependency
 
-We have an automated CI workflow to update the vCluster dependency and vCluster CLI versions in E2E tests. Here's how to use it:
+We have a script to update the vCluster dependency and vCluster CLI versions in E2E tests. Here's how to use it:
 
-1. Navigate to the "Actions" tab in the repository
-2. Find and select the "Update vCluster dep" workflow
-3. Click "Run workflow"
-4. Enter the target vCluster version (e.g., `v0.25.0`) as the input parameter
-5. Run the workflow
-
-The CI job will automatically:
-- Update the necessary dependencies
-- Generate a Pull Request in this repository with the changes
+1. Clone the repository
+2. `export VCLUSTER_VERSION="v0.26.0"`
+3. Run `go run ./hack/bump-vcluster-dep.go "v0.26.0"` (replace "v0.26.0" with targeted vCluster version)
+4. Add and commit changes to the new branch
+5. Open a Pull Request
 
 ### After the PR is created:
 - Verify that all E2E tests pass on the PR
 - Some cases may require additional manual changes (if tests fail, check the logs)
 - Once all tests pass, the PR is ready to be reviewed and merged
+- merge the PR
+
+### Update examples
+Run following commands in each: `examples/bootstrap-with-deployment`, `examples/crd-sync`, `examples/hooks`:
+1. `go get github.com/loft-sh/vcluster@${VCLUSTER_VERSION}`
+2. Get the last commit SHA on main branch (one from the PR you just merged)
+3. Run `go get github.com/loft-sh/vcluster-sdk@{COMMIT_SHA}`
+4. Run `go mod tidy`
+5. Ensure that example compiles by building a docker image: `docker build . -t my-repo/my-plugin:0.0.1`
+6. If it fails to compile, you need to adjust the `*.go` files in the examples to the in the syncer interfaces in the vCluster targeted version
+7. Once all of them compile, commit changes and open a PR
+8. Merge PR
+
+### Create vcluster-sdk release
+1. In Github, click on "Create release", pick a tag and release branch, autogenerate release notes.
+2. Release pipeline will build vcluster-sdk image and examples image
 
 This process helps keep our vCluster dependencies up-to-date while ensuring compatibility through the e2e test suite.

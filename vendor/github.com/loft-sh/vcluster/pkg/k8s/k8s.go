@@ -1,14 +1,14 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
+	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 
 	vclusterconfig "github.com/loft-sh/vcluster/config"
@@ -16,21 +16,14 @@ import (
 	"github.com/loft-sh/vcluster/pkg/constants"
 	"github.com/loft-sh/vcluster/pkg/etcd"
 	"github.com/loft-sh/vcluster/pkg/pro"
-	"github.com/loft-sh/vcluster/pkg/util/commandwriter"
+	"github.com/loft-sh/vcluster/pkg/util/command"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
 
-func StartK8S(
-	ctx context.Context,
-	serviceCIDR string,
-	apiServer vclusterconfig.DistroContainerEnabled,
-	controllerManager vclusterconfig.DistroContainerEnabled,
-	scheduler vclusterconfig.DistroContainer,
-	vConfig *config.VirtualClusterConfig,
-) error {
-	errChan := make(chan error, 1)
-
+func StartK8S(ctx context.Context, serviceCIDR string, vConfig *config.VirtualClusterConfig) error {
 	// start the backing store
 	etcdEndpoints, etcdCertificates, err := StartBackingStore(ctx, vConfig)
 	if err != nil {
@@ -38,6 +31,7 @@ func StartK8S(
 	}
 
 	// start api server first
+	apiServer := vConfig.ControlPlane.Distro.K8S.APIServer
 	if apiServer.Enabled {
 		go func() {
 			// build flags
@@ -51,12 +45,11 @@ func StartK8S(
 			if len(apiServer.Command) > 0 {
 				args = append(args, apiServer.Command...)
 			} else {
-				args = append(args, "/binaries/kube-apiserver")
-				args = append(args, "--advertise-address=127.0.0.1")
+				args = append(args, constants.K8sAPIServerBinary)
 				args = append(args, "--service-cluster-ip-range="+serviceCIDR)
 				args = append(args, "--bind-address=127.0.0.1")
 				args = append(args, "--allow-privileged=true")
-				args = append(args, "--authorization-mode=RBAC")
+				args = append(args, "--authorization-mode=Node,RBAC")
 				args = append(args, "--client-ca-file="+vConfig.VirtualClusterKubeConfig().ClientCACert)
 				args = append(args, "--enable-bootstrap-token-auth=true")
 				args = append(args, "--etcd-servers="+etcdEndpoints)
@@ -65,8 +58,8 @@ func StartK8S(
 					args = append(args, "--etcd-certfile="+etcdCertificates.ServerCert)
 					args = append(args, "--etcd-keyfile="+etcdCertificates.ServerKey)
 				}
-				args = append(args, "--proxy-client-cert-file=/data/pki/front-proxy-client.crt")
-				args = append(args, "--proxy-client-key-file=/data/pki/front-proxy-client.key")
+				args = append(args, "--proxy-client-cert-file="+constants.FrontProxyClientCert)
+				args = append(args, "--proxy-client-key-file="+constants.FrontProxyClientKey)
 				args = append(args, "--requestheader-allowed-names=front-proxy-client")
 				args = append(args, "--requestheader-client-ca-file="+vConfig.VirtualClusterKubeConfig().RequestHeaderCACert)
 				args = append(args, "--requestheader-extra-headers-prefix=X-Remote-Extra-")
@@ -74,36 +67,64 @@ func StartK8S(
 				args = append(args, "--requestheader-username-headers=X-Remote-User")
 				args = append(args, "--secure-port=6443")
 				args = append(args, "--service-account-issuer="+issuer)
-				args = append(args, "--service-account-key-file=/data/pki/sa.pub")
-				args = append(args, "--service-account-signing-key-file=/data/pki/sa.key")
-				args = append(args, "--tls-cert-file=/data/pki/apiserver.crt")
-				args = append(args, "--tls-private-key-file=/data/pki/apiserver.key")
-				args = append(args, "--endpoint-reconciler-type=none")
+				args = append(args, "--service-account-key-file="+constants.SACert)
+				args = append(args, "--service-account-signing-key-file="+constants.SAKey)
+				args = append(args, "--tls-cert-file="+constants.APIServerCert)
+				args = append(args, "--tls-private-key-file="+constants.APIServerKey)
 				args = append(args, "--profiling=false")
+
+				// this is a hack since we want to set this ourselves and k8s does not support setting a custom port for this
+				args = append(args, "--advertise-address=127.0.0.1")
+				args = append(args, "--endpoint-reconciler-type=none")
+
+				if vConfig.PrivateNodes.Enabled {
+					args = append(args, "--kubelet-client-certificate="+constants.APIServerKubeletClientCert)
+					args = append(args, "--kubelet-client-key="+constants.APIServerKubeletClientKey)
+					args = append(args, "--enable-admission-plugins=NodeRestriction")
+					args = append(args, "--endpoint-reconciler-type=none")
+
+					// if konnectivity is enabled, we need to write the egress config
+					if vConfig.ControlPlane.Advanced.Konnectivity.Server.Enabled {
+						egressConfig, err := pro.WriteKonnectivityEgressConfig()
+						if err != nil {
+							klog.Fatalf("error writing konnectivity egress config: %s", err.Error())
+							return
+						}
+
+						args = append(args, "--egress-selector-config-file="+egressConfig)
+					}
+				}
 			}
 
 			// add extra args
-			args = append(args, apiServer.ExtraArgs...)
+			args = command.MergeArgs(args, apiServer.ExtraArgs)
 
 			// wait until etcd is up and running
 			err := etcd.WaitForEtcd(ctx, etcdCertificates, etcdEndpoints)
 			if err != nil {
-				errChan <- err
+				klog.Fatalf("error waiting for etcd to be up: %s", err.Error())
 				return
 			}
 
 			// now start the api server
-			errChan <- RunCommand(ctx, args, "apiserver")
+			err = command.RunCommand(ctx, args, "apiserver")
+			if err != nil {
+				klog.Fatalf("error running apiserver: %s", err.Error())
+				return
+			}
+			klog.Info("apiserver finished")
+			os.Exit(0)
 		}()
 	}
 
 	// wait for api server to be up as otherwise controller and scheduler might fail
-	err = waitForAPI(ctx)
+	err = waitForAPI(ctx, vConfig.VirtualClusterKubeConfig().KubeConfig)
 	if err != nil {
 		return fmt.Errorf("waited until timeout for the api to be up: %w", err)
 	}
 
 	// start controller command
+	controllerManager := vConfig.ControlPlane.Distro.K8S.ControllerManager
 	if controllerManager.Enabled {
 		go func() {
 			// build flags
@@ -111,57 +132,71 @@ func StartK8S(
 			if len(controllerManager.Command) > 0 {
 				args = append(args, controllerManager.Command...)
 			} else {
-				args = append(args, "/binaries/kube-controller-manager")
+				args = append(args, constants.K8sControllerManagerBinary)
 				args = append(args, "--service-cluster-ip-range="+serviceCIDR)
-				args = append(args, "--authentication-kubeconfig=/data/pki/controller-manager.conf")
-				args = append(args, "--authorization-kubeconfig=/data/pki/controller-manager.conf")
+				args = append(args, "--authentication-kubeconfig="+constants.ControllerManagerConf)
+				args = append(args, "--authorization-kubeconfig="+constants.ControllerManagerConf)
 				args = append(args, "--bind-address=127.0.0.1")
 				args = append(args, "--client-ca-file="+vConfig.VirtualClusterKubeConfig().ClientCACert)
 				args = append(args, "--cluster-name=kubernetes")
 				args = append(args, "--cluster-signing-cert-file="+vConfig.VirtualClusterKubeConfig().ServerCACert)
 				args = append(args, "--cluster-signing-key-file="+vConfig.VirtualClusterKubeConfig().ServerCAKey)
-				args = append(args, "--horizontal-pod-autoscaler-sync-period=60s")
-				args = append(args, "--kubeconfig=/data/pki/controller-manager.conf")
-				args = append(args, "--node-monitor-grace-period=180s")
-				args = append(args, "--node-monitor-period=30s")
-				args = append(args, "--pvclaimbinder-sync-period=60s")
+				args = append(args, "--kubeconfig="+constants.ControllerManagerConf)
 				args = append(args, "--requestheader-client-ca-file="+vConfig.VirtualClusterKubeConfig().RequestHeaderCACert)
 				args = append(args, "--root-ca-file="+vConfig.VirtualClusterKubeConfig().ServerCACert)
-				args = append(args, "--service-account-private-key-file=/data/pki/sa.key")
+				args = append(args, "--service-account-private-key-file="+constants.SAKey)
 				args = append(args, "--use-service-account-credentials=true")
 				if vConfig.ControlPlane.StatefulSet.HighAvailability.Replicas > 1 {
 					args = append(args, "--leader-elect=true")
 				} else {
 					args = append(args, "--leader-elect=false")
 				}
-				if vConfig.ControlPlane.Advanced.VirtualScheduler.Enabled {
+
+				if vConfig.PrivateNodes.Enabled {
+					args = append(args, "--controllers=*,bootstrapsigner,tokencleaner")
+					args = append(args, "--allocate-node-cidrs=true")
+					args = append(args, "--cluster-cidr="+vConfig.Networking.PodCIDR)
+				} else if vConfig.IsVirtualSchedulerEnabled() {
 					args = append(args, "--controllers=*,-nodeipam,-persistentvolume-binder,-attachdetach,-persistentvolume-expander,-cloud-node-lifecycle,-ttl")
 					args = append(args, "--node-monitor-grace-period=1h")
 					args = append(args, "--node-monitor-period=1h")
+					args = append(args, "--pvclaimbinder-sync-period=60s")
+					args = append(args, "--horizontal-pod-autoscaler-sync-period=60s")
 				} else {
 					args = append(args, "--controllers=*,-nodeipam,-nodelifecycle,-persistentvolume-binder,-attachdetach,-persistentvolume-expander,-cloud-node-lifecycle,-ttl")
+					args = append(args, "--node-monitor-grace-period=180s")
+					args = append(args, "--node-monitor-period=30s")
+					args = append(args, "--pvclaimbinder-sync-period=60s")
+					args = append(args, "--horizontal-pod-autoscaler-sync-period=60s")
 				}
 			}
 
 			// add extra args
-			args = append(args, controllerManager.ExtraArgs...)
-			errChan <- RunCommand(ctx, args, "controller-manager")
+			args = command.MergeArgs(args, controllerManager.ExtraArgs)
+			err = command.RunCommand(ctx, args, "controller-manager")
+			if err != nil {
+				klog.Fatalf("error running controller-manager: %s", err.Error())
+				return
+			}
+			klog.Info("controller-manager finished")
+			os.Exit(0)
 		}()
 	}
 
 	// start scheduler command
-	if vConfig.ControlPlane.Advanced.VirtualScheduler.Enabled {
+	scheduler := vConfig.ControlPlane.Distro.K8S.Scheduler
+	if vConfig.IsVirtualSchedulerEnabled() || vConfig.PrivateNodes.Enabled {
 		go func() {
 			// build flags
 			args := []string{}
 			if len(scheduler.Command) > 0 {
 				args = append(args, scheduler.Command...)
 			} else {
-				args = append(args, "/binaries/kube-scheduler")
-				args = append(args, "--authentication-kubeconfig=/data/pki/scheduler.conf")
-				args = append(args, "--authorization-kubeconfig=/data/pki/scheduler.conf")
+				args = append(args, constants.K8sSchedulerBinary)
+				args = append(args, "--authentication-kubeconfig="+constants.SchedulerConf)
+				args = append(args, "--authorization-kubeconfig="+constants.SchedulerConf)
 				args = append(args, "--bind-address=127.0.0.1")
-				args = append(args, "--kubeconfig=/data/pki/scheduler.conf")
+				args = append(args, "--kubeconfig="+constants.SchedulerConf)
 				if vConfig.ControlPlane.StatefulSet.HighAvailability.Replicas > 1 {
 					args = append(args, "--leader-elect=true")
 				} else {
@@ -170,19 +205,32 @@ func StartK8S(
 			}
 
 			// add extra args
-			args = append(args, scheduler.ExtraArgs...)
-			errChan <- RunCommand(ctx, args, "scheduler")
+			args = command.MergeArgs(args, scheduler.ExtraArgs)
+			err = command.RunCommand(ctx, args, "scheduler")
+			if err != nil {
+				klog.Fatalf("error running scheduler: %s", err.Error())
+				return
+			}
+			klog.Info("scheduler finished")
+			os.Exit(0)
 		}()
 	}
 
-	return <-errChan
+	// start konnectivity server
+	err = pro.StartKonnectivity(ctx, vConfig)
+	if err != nil {
+		return fmt.Errorf("error starting konnectivity: %w", err)
+	}
+
+	<-ctx.Done()
+	return ctx.Err()
 }
 
-func StartKine(ctx context.Context, dataSource, listenAddress string, certificates *etcd.Certificates) {
+func StartKine(ctx context.Context, dataSource, listenAddress string, certificates *etcd.Certificates, extraArgs []string) {
 	// start embedded mode
 	go func() {
 		args := []string{}
-		args = append(args, "/usr/local/bin/kine")
+		args = append(args, constants.KineBinary)
 		args = append(args, "--endpoint="+dataSource)
 		if certificates != nil {
 			if certificates.CaCert != "" {
@@ -197,12 +245,15 @@ func StartKine(ctx context.Context, dataSource, listenAddress string, certificat
 		}
 		args = append(args, "--metrics-bind-address=0")
 		args = append(args, "--listen-address="+listenAddress)
+		args = command.MergeArgs(args, extraArgs)
 
 		// now start kine
-		err := RunCommand(ctx, args, "kine")
+		err := command.RunCommand(ctx, args, "kine")
 		if err != nil {
 			klog.Fatal("could not run kine", err)
 		}
+		klog.Info("kine finished")
+		os.Exit(0)
 	}()
 }
 
@@ -222,7 +273,7 @@ func StartBackingStore(ctx context.Context, vConfig *config.VirtualClusterConfig
 			CaCert:     vConfig.ControlPlane.BackingStore.Database.Embedded.CaFile,
 			ServerKey:  vConfig.ControlPlane.BackingStore.Database.Embedded.KeyFile,
 			ServerCert: vConfig.ControlPlane.BackingStore.Database.Embedded.CertFile,
-		})
+		}, vConfig.ControlPlane.BackingStore.Database.Embedded.ExtraArgs)
 
 		etcdEndpoints = constants.K8sKineEndpoint
 	} else if vConfig.ControlPlane.BackingStore.Database.External.Enabled {
@@ -249,9 +300,9 @@ func StartBackingStore(ctx context.Context, vConfig *config.VirtualClusterConfig
 	} else {
 		// embedded or deployed etcd
 		etcdCertificates = &etcd.Certificates{
-			CaCert:     "/data/pki/etcd/ca.crt",
-			ServerCert: "/data/pki/apiserver-etcd-client.crt",
-			ServerKey:  "/data/pki/apiserver-etcd-client.key",
+			CaCert:     filepath.Join(constants.PKIDir, "etcd", "ca.crt"),
+			ServerCert: filepath.Join(constants.PKIDir, "apiserver-etcd-client.crt"),
+			ServerKey:  filepath.Join(constants.PKIDir, "apiserver-etcd-client.key"),
 		}
 
 		if vConfig.ControlPlane.BackingStore.Etcd.Embedded.Enabled {
@@ -266,78 +317,66 @@ func StartBackingStore(ctx context.Context, vConfig *config.VirtualClusterConfig
 	return etcdEndpoints, etcdCertificates, nil
 }
 
-func RunCommand(ctx context.Context, command []string, component string) error {
-	writer, err := commandwriter.NewCommandWriter(component, false)
+func ExecTemplate(templateContents string, name, namespace string, values *vclusterconfig.Config) ([]byte, error) {
+	out, err := json.Marshal(values)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer writer.Writer()
 
-	// start the command
-	klog.InfoS("Starting "+component, "args", strings.Join(command, " "))
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	cmd.Stdout = writer.Writer()
-	cmd.Stderr = writer.Writer()
-	cmd.Cancel = func() error {
-		err := cmd.Process.Signal(os.Interrupt)
-		if err != nil {
-			return fmt.Errorf("signal %s: %w", command[0], err)
-		}
-
-		state, err := cmd.Process.Wait()
-		if err == nil && state.Pid() > 0 {
-			time.Sleep(2 * time.Second)
-		}
-
-		err = cmd.Process.Kill()
-		if err != nil {
-			return fmt.Errorf("kill %s: %w", command[0], err)
-		}
-
-		return nil
+	rawValues := map[string]interface{}{}
+	err = json.Unmarshal(out, &rawValues)
+	if err != nil {
+		return nil, err
 	}
-	err = cmd.Run()
 
-	// make sure we wait for scanner to be done
-	writer.CloseAndWait(ctx, err)
-	return fmt.Errorf("error running command %s: %w", command[0], err)
+	t, err := template.New("").Parse(templateContents)
+	if err != nil {
+		return nil, err
+	}
+
+	b := &bytes.Buffer{}
+	err = t.Execute(b, map[string]interface{}{
+		"Values": rawValues,
+		"Release": map[string]interface{}{
+			"Name":      name,
+			"Namespace": namespace,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
 }
 
 // waits for the api to be up, ignoring certs and calling it
 // localhost
-func waitForAPI(ctx context.Context) error {
-	client := &http.Client{
-		Timeout: 2 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
+func waitForAPI(ctx context.Context, kubeConfig string) error {
+	rawConfig, err := clientcmd.LoadFromFile(kubeConfig)
+	if err != nil {
+		return fmt.Errorf("error loading kube config: %w", err)
 	}
+
+	restConfig, err := clientcmd.NewDefaultClientConfig(*rawConfig, &clientcmd.ConfigOverrides{}).ClientConfig()
+	if err != nil {
+		return fmt.Errorf("error creating rest client: %w", err)
+	}
+
+	clientSet, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("error creating clientset: %w", err)
+	}
+	restClient := clientSet.DiscoveryClient.RESTClient()
 
 	// sometimes the etcd pod takes a very long time to be ready,
 	// we might want to fine tune how long we wait later
 	var lastErr error
-	err := wait.PollUntilContextTimeout(ctx, time.Second*2, time.Minute*5, true, func(ctx context.Context) (done bool, err error) {
-		// build the request
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://127.0.0.1:6443/readyz", nil)
-		if err != nil {
-			lastErr = err
-			klog.Errorf("could not create the request to wait for the api: %s", err.Error())
-			return false, nil
-		}
-
+	err = wait.PollUntilContextTimeout(ctx, time.Second*2, time.Minute*5, true, func(ctx context.Context) (done bool, err error) {
 		// do the request
-		response, err := client.Do(req)
+		_, err = restClient.Get().AbsPath("/readyz").DoRaw(ctx)
 		if err != nil {
 			lastErr = err
-			klog.Info("error while targeting the api on localhost, this is expected during the vCluster creation, will retry after 2 seconds:", err)
-			return false, nil
-		}
-
-		// check if we got a ok response status code
-		if response.StatusCode != http.StatusOK {
-			bytes, _ := io.ReadAll(response.Body)
-			klog.FromContext(ctx).Info("api server not ready yet", "reason", string(bytes))
-			lastErr = fmt.Errorf("api server not ready yet, reason: %s", string(bytes))
+			klog.Warningf("could not create the request to wait for the api: %s", err.Error())
 			return false, nil
 		}
 

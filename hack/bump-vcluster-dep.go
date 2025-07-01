@@ -26,6 +26,8 @@ func main() {
 	}
 	defer workflowFile.Close()
 
+	versionWithoutV := strings.TrimPrefix(version, "v")
+
 	scanner := bufio.NewScanner(workflowFile)
 	var output string
 
@@ -33,6 +35,10 @@ func main() {
 		line := scanner.Text()
 		if strings.Contains(line, "  VCLUSTER_VERSION:") {
 			replacedLine := "  VCLUSTER_VERSION: " + version + "\n"
+			log.Printf("replacing line: \n%s\n with: \n%s\n", line, replacedLine)
+			output = output + replacedLine
+		} else if strings.Contains(line, "  VCLUSTER_BACKGROUND_PROXY_IMAGE: ghcr.io/loft-sh/vcluster-pro:") {
+			replacedLine := "  VCLUSTER_BACKGROUND_PROXY_IMAGE: ghcr.io/loft-sh/vcluster-pro:" + versionWithoutV + "\n"
 			log.Printf("replacing line: \n%s\n with: \n%s\n", line, replacedLine)
 			output = output + replacedLine
 		} else {

@@ -19,6 +19,9 @@ sync:
       enabled: true
       translateImage: {}
       enforceTolerations: []
+      hybridScheduling:
+        enabled: false
+        hostSchedulers: []
       useSecretsForSATokens: false
       runtimeClassName: ""
       priorityClassName: ""
@@ -51,6 +54,9 @@ sync:
       enabled: false
     persistentVolumes:
       enabled: false
+    namespaces:
+      enabled: false
+      mappingsOnly: false
 
   fromHost:
     events:
@@ -106,6 +112,7 @@ controlPlane:
         command: []
         extraArgs: []
       scheduler:
+        enabled: false
         command: []
         extraArgs: []
       env: []
@@ -136,29 +143,11 @@ controlPlane:
           cpu: 40m
           memory: 64Mi
 
-    k0s:
-      enabled: false
-      config: ""
-      command: []
-      extraArgs: []
-      imagePullPolicy: ""
-      image:
-        registry: ""
-        repository: "k0sproject/k0s"
-        tag: "v1.30.2-k0s.0"
-      securityContext: {}
-      resources:
-        limits:
-          cpu: 100m
-          memory: 256Mi
-        requests:
-          cpu: 40m
-          memory: 64Mi
-
   backingStore:
     database:
       embedded:
         enabled: false
+        extraArgs: []
       external:
         enabled: false
         dataSource: ""
@@ -166,10 +155,12 @@ controlPlane:
         certFile: ""
         keyFile: ""
         caFile: ""
+        extraArgs: []
     etcd:
       embedded:
         enabled: false
         migrateFromDeployedEtcd: false
+        extraArgs: []
       external:
         enabled: false
         endpoint: ""
@@ -237,6 +228,9 @@ controlPlane:
     overwriteManifests: ""
     overwriteConfig: ""
     priorityClassName: ""
+    security:
+      podSecurityContext: {}
+      containerSecurityContext: {}
     service:
       annotations: {}
       labels: {}
@@ -288,6 +282,14 @@ controlPlane:
       nginx.ingress.kubernetes.io/ssl-redirect: "true"
     spec:
       tls: []
+
+  standalone:
+    dataDir: "/var/lib/vcluster"
+    bundleRepository: "https://github.com/loft-sh/kubernetes/releases/download"
+    joinNode:
+      enabled: true
+      containerd:
+        enabled: true
 
   statefulSet:
     labels: {}
@@ -357,10 +359,20 @@ controlPlane:
     probes:
       livenessProbe:
         enabled: true
+        failureThreshold: 60
+        initialDelaySeconds: 60
+        timeoutSeconds: 3
+        periodSeconds: 2
       readinessProbe:
         enabled: true
+        failureThreshold: 60
+        timeoutSeconds: 3
+        periodSeconds: 2
       startupProbe:
         enabled: true
+        failureThreshold: 300
+        timeoutSeconds: 3
+        periodSeconds: 6
 
   serviceMonitor:
     enabled: false
@@ -391,8 +403,62 @@ controlPlane:
       labels: {}
       annotations: {}
 
+    konnectivity:
+      server:
+        enabled: true
+        extraArgs: []
+      agent:
+        enabled: true
+        replicas: 1
+        image: ""
+        imagePullPolicy: ""
+        nodeSelector: {}
+        tolerations: []
+        extraEnv: []
+        extraArgs: []
+
+    registry:
+      enabled: false
+      anonymousPull: true
+      config: {}
+
     globalMetadata:
       annotations: {}
+
+privateNodes:
+  enabled: false
+  importNodeBinaries: true
+  autoUpgrade:
+    enabled: true
+    concurrency: 1
+  joinNode:
+    containerd:
+      enabled: true
+
+deploy:
+  localPathProvisioner:
+    enabled: true
+  cni:
+    flannel:
+      enabled: true
+  kubeProxy:
+    enabled: true
+    image: ""
+    imagePullPolicy: ""
+    nodeSelector: {}
+    tolerations: []
+    extraEnv: []
+    extraArgs: []
+  metallb:
+    enabled: false
+    ipAddressPool:
+      addresses: []
+      l2Advertisement: true
+  ingressNginx:
+    enabled: false
+    defaultIngressClass: true
+  metricsServer:
+    enabled: false
 
 integrations:
   metricsServer:
@@ -464,6 +530,7 @@ rbac:
     extraRules: []
 
 networking:
+  podCIDR: "10.244.0.0/16"
   replicateServices:
     toHost: []
     fromHost: []
@@ -554,12 +621,7 @@ external: {}
 plugins: {}
 
 experimental:
-  multiNamespaceMode:
-    enabled: false
-
   syncSettings:
-    disableSync: false
-    rewriteKubernetesService: false
     targetNamespace: ""
     setOwner: true
 
@@ -583,3 +645,6 @@ experimental:
 
 telemetry:
   enabled: true
+
+logging:
+  encoding: console

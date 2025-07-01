@@ -10,6 +10,7 @@ import (
 	vclusterconfig "github.com/loft-sh/vcluster/config"
 	"github.com/loft-sh/vcluster/pkg/config"
 	"github.com/loft-sh/vcluster/pkg/k3s"
+	"github.com/loft-sh/vcluster/pkg/pro"
 	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,16 +38,19 @@ func InitClients(vConfig *config.VirtualClusterConfig) error {
 		return err
 	}
 
-	// get workload target namespace
-	if vConfig.Experimental.MultiNamespaceMode.Enabled {
-		translate.Default = translate.NewMultiNamespaceTranslator(vConfig.WorkloadNamespace)
-	} else {
-		// ensure target namespace
-		vConfig.WorkloadTargetNamespace = vConfig.Experimental.SyncSettings.TargetNamespace
-		if vConfig.WorkloadTargetNamespace == "" {
-			vConfig.WorkloadTargetNamespace = vConfig.WorkloadNamespace
-		}
+	// ensure target namespace
+	vConfig.WorkloadTargetNamespace = vConfig.Experimental.SyncSettings.TargetNamespace
+	if vConfig.WorkloadTargetNamespace == "" {
+		vConfig.WorkloadTargetNamespace = vConfig.WorkloadNamespace
+	}
 
+	// get workload target namespace translator
+	if vConfig.Sync.ToHost.Namespaces.Enabled {
+		translate.Default, err = pro.GetWithSyncedNamespacesTranslator(vConfig.WorkloadTargetNamespace, vConfig.Sync.ToHost.Namespaces.Mappings)
+		if err != nil {
+			return err
+		}
+	} else {
 		translate.Default = translate.NewSingleNamespaceTranslator(vConfig.WorkloadTargetNamespace)
 	}
 
@@ -119,21 +123,13 @@ func EnsureBackingStoreChanges(ctx context.Context, client kubernetes.Interface,
 
 // CheckUsingHeuristic checks for known file path indicating the existence of a previous distro.
 //
-// It checks for the existence of the default K3s token path or the K0s data directory.
+// It checks for the existence of the default K3s token path.
 func CheckUsingHeuristic(distro string) (bool, error) {
 	// check if previously we were using k3s as a default and now have switched to a different distro
 	if distro != vclusterconfig.K3SDistro && distro != vclusterconfig.K8SDistro {
 		_, err := os.Stat(k3s.TokenPath)
 		if err == nil {
 			return false, fmt.Errorf("seems like you were using k3s as a distro before and now have switched to %s, please make sure to not switch between vCluster distros", distro)
-		}
-	}
-
-	// check if previously we were using k0s as distro
-	if distro != vclusterconfig.K0SDistro {
-		_, err := os.Stat("/data/k0s")
-		if err == nil {
-			return false, fmt.Errorf("seems like you were using k0s as a distro before and now have switched to %s, please make sure to not switch between vCluster distros", distro)
 		}
 	}
 
@@ -156,7 +152,7 @@ func CheckUsingSecretAnnotation(ctx context.Context, client kubernetes.Interface
 	// Thus we can check if the distro has changed.
 	okCounter := 0
 	if annotatedDistro, ok := secret.Annotations[AnnotationDistro]; ok {
-		if err := vclusterconfig.ValidateStoreAndDistroChanges("", "", distro, annotatedDistro); err != nil {
+		if err := vclusterconfig.ValidateDistroChanges(distro, annotatedDistro); err != nil {
 			return false, err
 		}
 
@@ -164,7 +160,7 @@ func CheckUsingSecretAnnotation(ctx context.Context, client kubernetes.Interface
 	}
 
 	if annotatedStore, ok := secret.Annotations[AnnotationStore]; ok {
-		if err := vclusterconfig.ValidateStoreAndDistroChanges(backingStoreType, vclusterconfig.StoreType(annotatedStore), "", ""); err != nil {
+		if err := vclusterconfig.ValidateStoreChanges(backingStoreType, vclusterconfig.StoreType(annotatedStore)); err != nil {
 			return false, err
 		}
 
@@ -211,7 +207,7 @@ func SetGlobalOwner(ctx context.Context, vConfig *config.VirtualClusterConfig) e
 		return nil
 	}
 
-	if vConfig.Experimental.MultiNamespaceMode.Enabled {
+	if vConfig.Sync.ToHost.Namespaces.Enabled {
 		klog.Warningf("Skip setting owner, because multi namespace mode is enabled")
 		return nil
 	}

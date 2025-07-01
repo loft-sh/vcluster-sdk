@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	vconfig "github.com/loft-sh/vcluster/config"
@@ -47,16 +48,9 @@ func GetEtcdEndpoint(vConfig *config.VirtualClusterConfig) (string, *Certificate
 	if vConfig.ControlPlane.BackingStore.Etcd.Deploy.Enabled || vConfig.ControlPlane.BackingStore.Etcd.Embedded.Enabled {
 		// embedded or deployed etcd
 		etcdCertificates = &Certificates{
-			CaCert:     "/data/pki/etcd/ca.crt",
-			ServerCert: "/data/pki/apiserver-etcd-client.crt",
-			ServerKey:  "/data/pki/apiserver-etcd-client.key",
-		}
-		if vConfig.Distro() == vconfig.K0SDistro {
-			etcdCertificates = &Certificates{
-				CaCert:     "/data/k0s/pki/etcd/ca.crt",
-				ServerCert: "/data/k0s/pki/apiserver-etcd-client.crt",
-				ServerKey:  "/data/k0s/pki/apiserver-etcd-client.key",
-			}
+			CaCert:     filepath.Join(constants.PKIDir, "etcd", "ca.crt"),
+			ServerCert: filepath.Join(constants.PKIDir, "apiserver-etcd-client.crt"),
+			ServerKey:  filepath.Join(constants.PKIDir, "apiserver-etcd-client.key"),
 		}
 
 		if vConfig.ControlPlane.BackingStore.Etcd.Embedded.Enabled {
@@ -77,18 +71,6 @@ func GetEtcdEndpoint(vConfig *config.VirtualClusterConfig) (string, *Certificate
 		etcdEndpoints = constants.K8sKineEndpoint
 	} else if vConfig.Distro() == vconfig.K3SDistro {
 		etcdEndpoints = constants.K3sKineEndpoint
-	} else if vConfig.Distro() == vconfig.K0SDistro {
-		if (vConfig.ControlPlane.BackingStore.Database.Embedded.Enabled && vConfig.ControlPlane.BackingStore.Database.Embedded.DataSource != "") ||
-			vConfig.ControlPlane.BackingStore.Database.External.Enabled {
-			etcdEndpoints = constants.K0sKineEndpoint
-		} else {
-			etcdEndpoints = "https://127.0.0.1:2379"
-			etcdCertificates = &Certificates{
-				CaCert:     "/data/k0s/pki/etcd/ca.crt",
-				ServerCert: "/data/k0s/pki/apiserver-etcd-client.crt",
-				ServerKey:  "/data/k0s/pki/apiserver-etcd-client.key",
-			}
-		}
 	}
 
 	return etcdEndpoints, etcdCertificates
