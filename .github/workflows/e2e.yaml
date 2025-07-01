@@ -21,6 +21,7 @@ env:
   VCLUSTER_SUFFIX: vcluster
   VCLUSTER_NAME: vcluster
   VCLUSTER_NAMESPACE: vcluster
+  VCLUSTER_BACKGROUND_PROXY_IMAGE: ghcr.io/loft-sh/vcluster-pro:0.26.0
 
 jobs:
   e2e-tests:
@@ -106,9 +107,9 @@ jobs:
         continue-on-error: true
         run: |
           set -x
-          docker pull ghcr.io/loft-sh/vcluster-pro:${{ env.VCLUSTER_VERSION }}
+          docker pull ${{ env.VCLUSTER_BACKGROUND_PROXY_IMAGE }}
 
-          VCLUSTER_SUFFIX=${{ env.VCLUSTER_SUFFIX }} VCLUSTER_NAME=${{ env.VCLUSTER_NAME }} VCLUSTER_NAMESPACE=${{ env.VCLUSTER_NAMESPACE }} VCLUSTER_BACKGROUND_PROXY_IMAGE="ghcr.io/loft-sh/vcluster-pro:${{ env.VCLUSTER_VERSION }}" go test -v -ginkgo.v -ginkgo.fail-fast
+          VCLUSTER_SUFFIX=${{ env.VCLUSTER_SUFFIX }} VCLUSTER_NAME=${{ env.VCLUSTER_NAME }} VCLUSTER_NAMESPACE=${{ env.VCLUSTER_NAMESPACE }} go test -v -ginkgo.v -ginkgo.fail-fast
 
       - name: Print logs if e2e tests fail
         if: steps.execute-e2e-tests.outcome == 'failure'
