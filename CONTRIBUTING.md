@@ -45,7 +45,7 @@ Run following commands in each: `examples/bootstrap-with-deployment`, `examples/
 3. Run `go get github.com/loft-sh/vcluster-sdk@{COMMIT_SHA}`
 4. Run `go mod tidy`
 5. Ensure that example compiles by building a docker image: `docker build . -t my-repo/my-plugin:0.0.1`
-6. If it fails to compile, you need to adjust `.go` files in the examples to the in the syncer interfaces in the vCluster targeted version
+6. If it fails to compile, you need to adjust the `*.go` files in the examples to the in the syncer interfaces in the vCluster targeted version
 7. Once all of them compile, commit changes and open a PR
 8. Merge PR
 

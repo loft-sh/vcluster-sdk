@@ -106,6 +106,7 @@ jobs:
         continue-on-error: true
         run: |
           set -x
+          docker pull ghcr.io/loft-sh/vcluster-pro:${{ env.VCLUSTER_VERSION }}
 
           VCLUSTER_SUFFIX=${{ env.VCLUSTER_SUFFIX }} VCLUSTER_NAME=${{ env.VCLUSTER_NAME }} VCLUSTER_NAMESPACE=${{ env.VCLUSTER_NAMESPACE }} VCLUSTER_BACKGROUND_PROXY_IMAGE="ghcr.io/loft-sh/vcluster-pro:${{ env.VCLUSTER_VERSION }}" go test -v -ginkgo.v -ginkgo.fail-fast
 
