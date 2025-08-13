@@ -18,6 +18,7 @@ import (
 	v2 "github.com/loft-sh/vcluster/pkg/plugin/v2"
 	"github.com/loft-sh/vcluster/pkg/scheme"
 	"github.com/loft-sh/vcluster/pkg/setup"
+	setupconfig "github.com/loft-sh/vcluster/pkg/setup/config"
 	"github.com/loft-sh/vcluster/pkg/syncer"
 	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	syncertypes "github.com/loft-sh/vcluster/pkg/syncer/types"
@@ -160,7 +161,7 @@ func (m *manager) InitWithOptions(options Options) (*synccontext.RegisterContext
 	virtualClusterConfig.Plugins = map[string]config2.Plugins{}
 
 	// init virtual cluster config
-	err = setup.InitAndValidateConfig(ctx, virtualClusterConfig)
+	err = setupconfig.InitAndValidateConfig(ctx, virtualClusterConfig)
 	if err != nil {
 		return nil, fmt.Errorf("init config: %w", err)
 	}

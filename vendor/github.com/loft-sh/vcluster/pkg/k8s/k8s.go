@@ -23,6 +23,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	SQLiteParams = "?_journal=WAL&cache=shared&_busy_timeout=30000&_txlock=immediate"
+)
+
 func StartK8S(ctx context.Context, serviceCIDR string, vConfig *config.VirtualClusterConfig) error {
 	// start the backing store
 	etcdEndpoints, etcdCertificates, err := StartBackingStore(ctx, vConfig)
@@ -146,11 +150,7 @@ func StartK8S(ctx context.Context, serviceCIDR string, vConfig *config.VirtualCl
 				args = append(args, "--root-ca-file="+vConfig.VirtualClusterKubeConfig().ServerCACert)
 				args = append(args, "--service-account-private-key-file="+constants.SAKey)
 				args = append(args, "--use-service-account-credentials=true")
-				if vConfig.ControlPlane.StatefulSet.HighAvailability.Replicas > 1 {
-					args = append(args, "--leader-elect=true")
-				} else {
-					args = append(args, "--leader-elect=false")
-				}
+				args = append(args, "--leader-elect=true")
 
 				if vConfig.PrivateNodes.Enabled {
 					args = append(args, "--controllers=*,bootstrapsigner,tokencleaner")
@@ -197,11 +197,7 @@ func StartK8S(ctx context.Context, serviceCIDR string, vConfig *config.VirtualCl
 				args = append(args, "--authorization-kubeconfig="+constants.SchedulerConf)
 				args = append(args, "--bind-address=127.0.0.1")
 				args = append(args, "--kubeconfig="+constants.SchedulerConf)
-				if vConfig.ControlPlane.StatefulSet.HighAvailability.Replicas > 1 {
-					args = append(args, "--leader-elect=true")
-				} else {
-					args = append(args, "--leader-elect=false")
-				}
+				args = append(args, "--leader-elect=true")
 			}
 
 			// add extra args
@@ -216,17 +212,28 @@ func StartK8S(ctx context.Context, serviceCIDR string, vConfig *config.VirtualCl
 		}()
 	}
 
-	// start konnectivity server
-	err = pro.StartKonnectivity(ctx, vConfig)
-	if err != nil {
-		return fmt.Errorf("error starting konnectivity: %w", err)
-	}
-
 	<-ctx.Done()
 	return ctx.Err()
 }
 
 func StartKine(ctx context.Context, dataSource, listenAddress string, certificates *etcd.Certificates, extraArgs []string) {
+	// start kine
+	doneChan := StartKineWithDone(ctx, dataSource, listenAddress, certificates, extraArgs)
+
+	// wait for kine to finish
+	go func() {
+		err := <-doneChan
+		if err != nil {
+			klog.Fatalf("could not run kine: %s", err.Error())
+		}
+		klog.Info("kine finished")
+		os.Exit(0)
+	}()
+}
+
+func StartKineWithDone(ctx context.Context, dataSource, listenAddress string, certificates *etcd.Certificates, extraArgs []string) <-chan error {
+	doneChan := make(chan error)
+
 	// start embedded mode
 	go func() {
 		args := []string{}
@@ -249,12 +256,10 @@ func StartKine(ctx context.Context, dataSource, listenAddress string, certificat
 
 		// now start kine
 		err := command.RunCommand(ctx, args, "kine")
-		if err != nil {
-			klog.Fatal("could not run kine", err)
-		}
-		klog.Info("kine finished")
-		os.Exit(0)
+		doneChan <- err
 	}()
+
+	return doneChan
 }
 
 func StartBackingStore(ctx context.Context, vConfig *config.VirtualClusterConfig) (string, *etcd.Certificates, error) {
@@ -266,7 +271,7 @@ func StartBackingStore(ctx context.Context, vConfig *config.VirtualClusterConfig
 	if vConfig.EmbeddedDatabase() {
 		dataSource := vConfig.ControlPlane.BackingStore.Database.Embedded.DataSource
 		if dataSource == "" {
-			dataSource = fmt.Sprintf("sqlite://%s?_journal=WAL&cache=shared&_busy_timeout=30000&_txlock=immediate", constants.K8sSqliteDatabase)
+			dataSource = fmt.Sprintf("sqlite://%s%s", constants.K8sSqliteDatabase, SQLiteParams)
 		}
 
 		StartKine(ctx, dataSource, constants.K8sKineEndpoint, &etcd.Certificates{

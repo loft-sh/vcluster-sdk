@@ -44,11 +44,7 @@ func ValidateNamespaceSyncConfig(c *config.Config, name, namespace string) error
 			return fmt.Errorf("%s: '%s':'%s' has mismatched wildcard '*' usage - pattern must always map to another pattern", configPathIdentifier, vNS, hNS)
 		}
 
-		// validate we're not mapping to host namespace in which vcluster is running
-		if err := validateHostMappingNotControlPlane(hNS, hIsPattern, configPathIdentifier, name, namespace); err != nil {
-			return err
-		}
-
+		// check common rules for vns and hns sides
 		var errLoop error
 		if vIsPattern && hIsPattern {
 			// validate pattern mapping rule
@@ -59,6 +55,11 @@ func ValidateNamespaceSyncConfig(c *config.Config, name, namespace string) error
 		}
 		if errLoop != nil {
 			return errLoop
+		}
+
+		// validate hns rules
+		if err := validateHostMappingRules(hNS, hIsPattern, configPathIdentifier, name, namespace); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -130,6 +131,12 @@ func validateToHostPatternNamespaceMappingPart(pattern, vclusterName, partIdenti
 	}
 
 	literalPrefixForValidation := strings.ReplaceAll(prefix, NamePlaceholder, vclusterName)
+
+	if len(literalPrefixForValidation) == 0 {
+		// This is a case where we're handling a catch-all '*' pattern - since we removed the wildcard suffix now we're working with empty string
+		return nil
+	}
+
 	if len(literalPrefixForValidation) > 32 {
 		return fmt.Errorf("%s: literal parts of %s pattern prefix '%s' (from '%s') cannot be longer than 32 characters (literal length: %d)", configPathIdentifier, partIdentifier, prefix, pattern, len(literalPrefixForValidation))
 	}
@@ -157,6 +164,20 @@ func validateNamePlaceholderUsage(namePart, vclusterName, partTypeIdentifier, co
 	tempName := strings.ReplaceAll(namePart, NamePlaceholder, vclusterName)
 	if strings.Contains(tempName, "${") && strings.Contains(tempName, "}") {
 		return fmt.Errorf("%s: %s '%s' contains an unsupported placeholder; only a single '%s' is allowed", configPathIdentifier, partTypeIdentifier, namePart, NamePlaceholder)
+	}
+
+	return nil
+}
+
+func validateHostMappingRules(hNS string, hIsPattern bool, configPathIdentifier, vclusterName, vclusterNamespace string) error {
+	// explicitly check against wildcard "catch all" mapping
+	if hIsPattern && hNS == WildcardChar {
+		return fmt.Errorf("%s: host pattern mappings must use a prefix before wildcard: %s", configPathIdentifier, hNS)
+	}
+
+	// validate we're not mapping to host namespace in which vcluster is running
+	if err := validateHostMappingNotControlPlane(hNS, hIsPattern, configPathIdentifier, vclusterName, vclusterNamespace); err != nil {
+		return err
 	}
 
 	return nil
