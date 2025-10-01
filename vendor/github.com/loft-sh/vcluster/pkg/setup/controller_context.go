@@ -19,6 +19,7 @@ import (
 	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
 	"github.com/loft-sh/vcluster/pkg/telemetry"
 	"github.com/loft-sh/vcluster/pkg/util/blockingcacheclient"
+	"github.com/loft-sh/vcluster/pkg/util/pluginhookclient"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -71,13 +72,13 @@ func NewControllerContext(ctx context.Context, options *config.VirtualClusterCon
 	// create physical manager
 	var localManager ctrl.Manager
 	if !options.ControlPlane.Standalone.Enabled {
-		klog.Info("Using physical cluster at " + options.WorkloadConfig.Host)
-		localManager, err = NewLocalManager(options.WorkloadConfig, ctrl.Options{
+		klog.Info("Using physical cluster at " + options.HostConfig.Host)
+		localManager, err = NewLocalManager(options.HostConfig, ctrl.Options{
 			Scheme:         scheme.Scheme,
 			Metrics:        metricsserver.Options{BindAddress: localManagerMetrics},
 			LeaderElection: false,
 			Cache:          getLocalCacheOptions(options),
-			NewClient:      pro.NewPhysicalClient(options),
+			NewClient:      pluginhookclient.NewPhysicalPluginClientFactory(blockingcacheclient.NewCacheClient),
 		})
 		if err != nil {
 			return nil, err
@@ -89,7 +90,7 @@ func NewControllerContext(ctx context.Context, options *config.VirtualClusterCon
 		Scheme:         scheme.Scheme,
 		Metrics:        metricsserver.Options{BindAddress: virtualManagerMetrics},
 		LeaderElection: false,
-		NewClient:      pro.NewVirtualClient(options),
+		NewClient:      pluginhookclient.NewVirtualPluginClientFactory(blockingcacheclient.NewCacheClient),
 	})
 	if err != nil {
 		return nil, err
@@ -114,7 +115,7 @@ func getLocalCacheOptions(options *config.VirtualClusterConfig) cache.Options {
 	// is multi namespace mode?
 	defaultNamespaces := make(map[string]cache.Config)
 	if !options.Sync.ToHost.Namespaces.Enabled {
-		defaultNamespaces[options.WorkloadTargetNamespace] = cache.Config{}
+		defaultNamespaces[options.HostTargetNamespace] = cache.Config{}
 	}
 	// do we need access to another namespace to export the kubeconfig ?
 	// we will need access to all the objects that the vcluster usually has access to
@@ -383,26 +384,31 @@ func initControllerContext(
 		}
 	}
 
-	etcdClient, err := etcd.NewFromConfig(ctx, vClusterOptions)
-	if err != nil {
-		return nil, fmt.Errorf("create etcd client: %w", err)
-	}
-
 	controllerContext := &synccontext.ControllerContext{
-		Context:      ctx,
-		LocalManager: localManager,
+		Context:     ctx,
+		HostManager: localManager,
 
 		VirtualManager:        virtualManager,
 		VirtualRawConfig:      virtualRawConfig,
 		VirtualClusterVersion: virtualClusterVersion,
 
-		EtcdClient: etcdClient,
-
-		WorkloadNamespaceClient: currentNamespaceClient,
+		HostNamespaceClient: currentNamespaceClient,
 
 		StopChan: stopChan,
 		Config:   vClusterOptions,
 	}
+
+	if vClusterOptions.PrivateNodes.Enabled {
+		// for private nodes, we don't need to configure etcd client because we don't need to store mappings
+		return controllerContext, nil
+	}
+
+	etcdClient, err := etcd.NewFromConfig(ctx, vClusterOptions)
+	if err != nil {
+		return nil, fmt.Errorf("create etcd client: %w", err)
+	}
+
+	controllerContext.EtcdClient = etcdClient
 
 	var localClient client.Client
 	if localManager != nil {
@@ -440,11 +446,11 @@ func newCurrentNamespaceClient(ctx context.Context, localManager ctrl.Manager, o
 	// as the regular cache is scoped to the options.TargetNamespace and cannot return
 	// objects from the current namespace.
 	currentNamespaceCache := localManager.GetCache()
-	if !options.Sync.ToHost.Namespaces.Enabled && options.WorkloadNamespace != options.WorkloadTargetNamespace {
+	if !options.Sync.ToHost.Namespaces.Enabled && options.HostNamespace != options.HostTargetNamespace {
 		currentNamespaceCache, err = cache.New(localManager.GetConfig(), cache.Options{
 			Scheme:            localManager.GetScheme(),
 			Mapper:            localManager.GetRESTMapper(),
-			DefaultNamespaces: map[string]cache.Config{options.WorkloadNamespace: {}},
+			DefaultNamespaces: map[string]cache.Config{options.HostNamespace: {}},
 		})
 		if err != nil {
 			return nil, err

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"regexp"
 	"strings"
 	"time"
 
@@ -109,6 +108,176 @@ type PrivateNodes struct {
 
 	// JoinNode holds configuration specifically used during joining the node (see "kubeadm join").
 	JoinNode JoinConfiguration `json:"joinNode,omitempty"`
+
+	// AutoNodes stores Auto Nodes configuration static and dynamic NodePools managed by Karpenter
+	AutoNodes PrivateNodesAutoNodes `json:"autoNodes,omitempty"`
+
+	// VPN holds configuration for the private nodes vpn. This can be used to connect the private nodes to the control plane or
+	// connect the private nodes to each other if they are not running in the same network. Platform connection is required for the vpn to work.
+	VPN PrivateNodesVPN `json:"vpn,omitempty"`
+}
+
+type CloudControllerManager struct {
+	// Enabled defines if the embedded cloud controller manager should be enabled. This defaults to true, but can be disabled if you want to use
+	// an external cloud controller manager such as AWS or GCP. The cloud controller manager is responsible for setting the node's ip addresses as well
+	// as the provider id for the node and other node metadata.
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+type PrivateNodesVPN struct {
+	// Enabled defines if the private nodes vpn should be enabled.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// NodeToNode holds configuration for the node to node vpn. This can be used to connect the private nodes to each other if they are not running in the same network.
+	NodeToNode PrivateNodesVPNNodeToNode `json:"nodeToNode,omitempty"`
+}
+
+type PrivateNodesVPNNodeToNode struct {
+	// Enabled defines if the node to node vpn should be enabled.
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+// PrivateNodesAutoNodes defines auto nodes
+type PrivateNodesAutoNodes struct {
+	// Static defines static node pools. Static node pools have a fixed size and are not scaled automatically.
+	Static []StaticNodePool `json:"static,omitempty"`
+
+	// Dynamic defines dynamic node pools. Dynamic node pools are scaled automatically based on the requirements within the cluster.
+	// Karpenter is used under the hood to handle the scheduling of the nodes.
+	Dynamic []DynamicNodePool `json:"dynamic,omitempty"`
+}
+
+type DynamicNodePool struct {
+	// Name is the name of this NodePool
+	Name string `json:"name" jsonschema:"required"`
+
+	// Provider is the node provider of the nodes in this pool.
+	Provider string `json:"provider,omitempty" jsonschema:"required"`
+
+	// Requirements filter the types of nodes that can be provisioned by this pool.
+	// All requirements must be met for a node type to be eligible.
+	Requirements []Requirement `json:"requirements,omitempty"`
+
+	// Taints are the taints to apply to the nodes in this pool.
+	Taints []KubeletJoinTaint `json:"taints,omitempty"`
+
+	// NodeLabels are the labels to apply to the nodes in this pool.
+	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
+
+	// Limits specify the maximum resources that can be provisioned by this node pool,
+	// mapping to the 'limits' field in Karpenter's NodePool API.
+	Limits map[string]string `json:"limits,omitempty"`
+
+	// Disruption contains the parameters that relate to Karpenter's disruption logic
+	Disruption DynamicNodePoolDisruption `json:"disruption,omitempty"`
+
+	// TerminationGracePeriod is the maximum duration the controller will wait before forcefully deleting the pods on a node, measured from when deletion is first initiated.
+	//
+	// Warning: this feature takes precedence over a Pod's terminationGracePeriodSeconds value, and bypasses any blocked PDBs or the karpenter.sh/do-not-disrupt annotation.
+	//
+	// This field is intended to be used by cluster administrators to enforce that nodes can be cycled within a given time period.
+	// When set, drifted nodes will begin draining even if there are pods blocking eviction. Draining will respect PDBs and the do-not-disrupt annotation until the TGP is reached.
+	//
+	// Karpenter will preemptively delete pods so their terminationGracePeriodSeconds align with the node's terminationGracePeriod.
+	// If a pod would be terminated without being granted its full terminationGracePeriodSeconds prior to the node timeout,
+	// that pod will be deleted at T = node timeout - pod terminationGracePeriodSeconds.
+	//
+	// The feature can also be used to allow maximum time limits for long-running jobs which can delay node termination with preStop hooks.
+	// Defaults to 30s. Set to Never to wait indefinitely for pods to be drained.
+	TerminationGracePeriod string `json:"terminationGracePeriod,omitempty"`
+
+	// The amount of time a Node can live on the cluster before being removed
+	ExpireAfter string `json:"expireAfter,omitempty"`
+
+	// Weight is the weight of this node pool.
+	Weight int `json:"weight,omitempty"`
+}
+
+type DynamicNodePoolDisruption struct {
+	// ConsolidateAfter is the duration the controller will wait
+	// before attempting to terminate nodes that are underutilized.
+	// Refer to ConsolidationPolicy for how underutilization is considered.
+	ConsolidateAfter string `json:"consolidateAfter,omitempty"`
+
+	// ConsolidationPolicy describes which nodes Karpenter can disrupt through its consolidation
+	// algorithm. This policy defaults to "WhenEmptyOrUnderutilized" if not specified
+	ConsolidationPolicy string `json:"consolidationPolicy,omitempty"`
+
+	// Budgets is a list of Budgets.
+	// If there are multiple active budgets, Karpenter uses
+	// the most restrictive value. If left undefined,
+	// this will default to one budget with a value to 10%.
+	Budgets []DynamicNodePoolDisruptionBudget `json:"budgets,omitempty"`
+}
+type DynamicNodePoolDisruptionBudget struct {
+	// Nodes dictates the maximum number of NodeClaims owned by this NodePool
+	// that can be terminating at once. This is calculated by counting nodes that
+	// have a deletion timestamp set, or are actively being deleted by Karpenter.
+	// This field is required when specifying a budget.
+	Nodes string `json:"nodes,omitempty"`
+
+	// Schedule specifies when a budget begins being active, following
+	// the upstream cronjob syntax. If omitted, the budget is always active.
+	// Timezones are not supported.
+	Schedule string `json:"schedule,omitempty"`
+
+	// Duration determines how long a Budget is active since each Schedule hit.
+	// Only minutes and hours are accepted, as cron does not work in seconds.
+	// If omitted, the budget is always active.
+	// This is required if Schedule is set.
+	Duration string `json:"duration,omitempty"`
+}
+
+type StaticNodePool struct {
+	// Name is the name of this static nodePool
+	Name string `json:"name" jsonschema:"required"`
+
+	// Provider is the node provider of the nodes in this pool.
+	Provider string `json:"provider,omitempty" jsonschema:"required"`
+
+	// Requirements filter the types of nodes that can be provisioned by this pool.
+	// All requirements must be met for a node type to be eligible.
+	Requirements []Requirement `json:"requirements,omitempty"`
+
+	// Taints are the taints to apply to the nodes in this pool.
+	Taints []KubeletJoinTaint `json:"taints,omitempty"`
+
+	// NodeLabels are the labels to apply to the nodes in this pool.
+	NodeLabels map[string]string `json:"nodeLabels,omitempty"`
+
+	// TerminationGracePeriod is the maximum duration the controller will wait before forcefully deleting the pods on a node, measured from when deletion is first initiated.
+	//
+	// Warning: this feature takes precedence over a Pod's terminationGracePeriodSeconds value, and bypasses any blocked PDBs or the karpenter.sh/do-not-disrupt annotation.
+	//
+	// This field is intended to be used by cluster administrators to enforce that nodes can be cycled within a given time period.
+	// When set, drifted nodes will begin draining even if there are pods blocking eviction. Draining will respect PDBs and the do-not-disrupt annotation until the TGP is reached.
+	//
+	// Karpenter will preemptively delete pods so their terminationGracePeriodSeconds align with the node's terminationGracePeriod.
+	// If a pod would be terminated without being granted its full terminationGracePeriodSeconds prior to the node timeout,
+	// that pod will be deleted at T = node timeout - pod terminationGracePeriodSeconds.
+	//
+	// The feature can also be used to allow maximum time limits for long-running jobs which can delay node termination with preStop hooks.
+	// Defaults to 30s. Set to Never to wait indefinitely for pods to be drained.
+	TerminationGracePeriod string `json:"terminationGracePeriod,omitempty"`
+
+	// Quantity is the number of desired nodes in this pool.
+	Quantity int `json:"quantity" jsonschema:"required"`
+}
+
+// KarpenterRequirement defines a scheduling requirement for a dynamic node pool.
+// It corresponds to an entry in the 'requirements' list of a Karpenter NodePool.
+type Requirement struct {
+	// Property is the property on the node type to select.
+	Property string `json:"property" jsonschema:"required"`
+
+	// Operator is the comparison operator, such as "In", "NotIn", "Exists". If empty, defaults to "In".
+	Operator string `json:"operator,omitempty"`
+
+	// Values is the list of values to use for comparison. This is mutually exclusive with value.
+	Values []string `json:"values,omitempty"`
+
+	// Value is the value to use for comparison. This is mutually exclusive with values.
+	Value string `json:"value,omitempty"`
 }
 
 type Deploy struct {
@@ -170,26 +339,26 @@ type Standalone struct {
 	// Enabled defines if standalone mode should be enabled.
 	Enabled bool `json:"enabled,omitempty"`
 
-	// SyncConfig allows controlling the vCluster config through a secret "vcluster-config" in the namespace "kube-system". vCluster will watch for changes in this secret and
-	// update the local config accordingly and restart vCluster if needed.
-	SyncConfig StandaloneSyncConfig `json:"syncConfig,omitempty"`
-
 	// DataDir defines the data directory for the standalone mode.
 	DataDir string `json:"dataDir,omitempty"`
 
-	// BundleRepository is the repository to use for downloading the Kubernetes bundle. Defaults to https://github.com/loft-sh/kubernetes/releases/download
-	BundleRepository string `json:"bundleRepository,omitempty"`
-
-	// Bundle is a path to a Kubernetes bundle to use for the standalone mode. If empty, will use the bundleRepository to download the bundle.
-	Bundle string `json:"bundle,omitempty"`
+	// AutoNodes automatically deploys nodes for standalone mode.
+	AutoNodes StandaloneAutoNodes `json:"autoNodes,omitempty"`
 
 	// JoinNode holds configuration for the standalone control plane node.
 	JoinNode StandaloneJoinNode `json:"joinNode,omitempty"`
 }
 
-type StandaloneSyncConfig struct {
-	// Enabled defines if config syncing should be enabled.
-	Enabled bool `json:"enabled,omitempty"`
+type StandaloneAutoNodes struct {
+	// Provider is the node provider of the nodes in this pool.
+	Provider string `json:"provider,omitempty"`
+
+	// Quantity is the number of nodes to deploy for standalone mode.
+	Quantity int `json:"quantity,omitempty"`
+
+	// Requirements filter the types of nodes that can be provisioned by this pool.
+	// All requirements must be met for a node type to be eligible.
+	Requirements []Requirement `json:"requirements,omitempty"`
 }
 
 type StandaloneJoinNode struct {
@@ -242,6 +411,23 @@ type ContainerdRegistry struct {
 
 	// Mirrors holds configuration for the containerd registry mirrors. E.g. myregistry.io:5000 or docker.io. See https://github.com/containerd/containerd/blob/main/docs/hosts.md for more details.
 	Mirrors map[string]ContainerdMirror `json:"mirrors,omitempty"`
+
+	// Auth holds configuration for the containerd registry auth. See https://github.com/containerd/containerd/blob/main/docs/cri/registry.md#configure-registry-credentials for more details.
+	Auth map[string]ContainerdRegistryAuth `json:"auth,omitempty"`
+}
+
+type ContainerdRegistryAuth struct {
+	// Username is the username for the containerd registry.
+	Username string `json:"username,omitempty"`
+
+	// Password is the password for the containerd registry.
+	Password string `json:"password,omitempty"`
+
+	// IdentityToken is the token for the containerd registry.
+	IdentityToken string `json:"identityToken,omitempty"`
+
+	// Auth is the auth config for the containerd registry.
+	Auth string `json:"auth,omitempty"`
 }
 
 type ContainerdMirror struct {
@@ -256,6 +442,9 @@ type ContainerdMirror struct {
 
 	// Capabilities is a list of capabilities to enable for the containerd registry mirror. If empty, will use pull and resolve capabilities.
 	Capabilities []string `json:"capabilities,omitempty"`
+
+	// OverridePath is a boolean to override the path for the containerd registry mirror.
+	OverridePath bool `json:"overridePath,omitempty"`
 
 	// Hosts holds configuration for the containerd registry mirror hosts. See https://github.com/containerd/containerd/blob/main/docs/hosts.md for more details.
 	Hosts []ContainerdMirrorHost `json:"hosts,omitempty"`
@@ -273,6 +462,9 @@ type ContainerdMirrorHost struct {
 
 	// Capabilities is a list of capabilities to enable for the containerd registry mirror. If empty, will use pull and resolve capabilities.
 	Capabilities []string `json:"capabilities,omitempty"`
+
+	// OverridePath is a boolean to override the path for the containerd registry mirror.
+	OverridePath bool `json:"overridePath,omitempty"`
 }
 
 type NodeRegistration struct {
@@ -532,6 +724,8 @@ type IstioSyncToHost struct {
 type ExternalSecrets struct {
 	// Enabled defines whether the external secret integration is enabled or not
 	Enabled bool `json:"enabled,omitempty"`
+	// Version defines the version of the external secrets operator to use. If empty, the storage version will be used.
+	Version string `json:"version,omitempty"`
 	// Webhook defines whether the host webhooks are reused or not
 	Webhook EnableSwitch `json:"webhook,omitempty"`
 	// Sync defines the syncing behavior for the integration
@@ -840,10 +1034,6 @@ func (c *Config) IsProFeatureEnabled() bool {
 	}
 
 	if c.ControlPlane.HostPathMapper.Central {
-		return true
-	}
-
-	if c.Experimental.IsolatedControlPlane.Enabled {
 		return true
 	}
 
@@ -2135,6 +2325,10 @@ type ControlPlaneAdvanced struct {
 	// Registry allows enabling an embedded docker image registry in vCluster. This is useful for air-gapped environments or when you don't have a public registry available to distribute images.
 	Registry Registry `json:"registry,omitempty"`
 
+	// CloudControllerManager holds configuration for the embedded cloud controller manager. This is only available when private nodes are enabled.
+	// The cloud controller manager is responsible for setting the node's ip addresses as well as the provider id for the node and other node metadata.
+	CloudControllerManager CloudControllerManager `json:"cloudControllerManager,omitempty"`
+
 	// GlobalMetadata is metadata that will be added to all resources deployed by Helm.
 	GlobalMetadata ControlPlaneGlobalMetadata `json:"globalMetadata,omitempty"`
 }
@@ -2697,13 +2891,8 @@ type Experimental struct {
 	// SyncSettings are advanced settings for the syncer controller.
 	SyncSettings ExperimentalSyncSettings `json:"syncSettings,omitempty"`
 
-	// GenericSync holds options to generically sync resources from virtual cluster to host.
-	GenericSync ExperimentalGenericSync `json:"genericSync,omitempty"`
-
-	// IsolatedControlPlane is a feature to run the vCluster control plane in a different Kubernetes cluster than the workloads themselves.
-	IsolatedControlPlane ExperimentalIsolatedControlPlane `json:"isolatedControlPlane,omitempty" product:"pro"`
-
 	// VirtualClusterKubeConfig allows you to override distro specifics and specify where vCluster will find the required certificates and vCluster config.
+	// Deprecated: Removed in 0.29.0.
 	VirtualClusterKubeConfig VirtualClusterKubeConfig `json:"virtualClusterKubeConfig,omitempty"`
 
 	// DenyProxyRequests denies certain requests in the vCluster proxy.
@@ -2714,25 +2903,9 @@ func (e Experimental) JSONSchemaExtend(base *jsonschema.Schema) {
 	addProToJSONSchema(base, reflect.TypeOf(e))
 }
 
-type ExperimentalIsolatedControlPlane struct {
-	// Enabled specifies if the isolated control plane feature should be enabled.
-	Enabled bool `json:"enabled,omitempty" product:"pro"`
-
-	// Headless states that Helm should deploy the vCluster in headless mode for the isolated control plane.
-	Headless bool `json:"headless,omitempty"`
-
-	// KubeConfig is the path where to find the remote workload cluster kubeconfig.
-	KubeConfig string `json:"kubeConfig,omitempty"`
-
-	// Namespace is the namespace where to sync the workloads into.
-	Namespace string `json:"namespace,omitempty"`
-
-	// Service is the vCluster service in the remote cluster.
-	Service string `json:"service,omitempty"`
-}
-
 type ExperimentalSyncSettings struct {
 	// TargetNamespace is the namespace where the workloads should get synced to.
+	// Deprecated: Removed in 0.29.0.
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 
 	// SetOwner specifies if vCluster should set an owner reference on the synced objects to the vCluster service. This allows for easy garbage collection.
@@ -2834,161 +3007,6 @@ type PlatformAPIKey struct {
 	// in the above namespace, if specified.
 	// This defaults to true.
 	CreateRBAC *bool `json:"createRBAC,omitempty"`
-}
-
-type ExperimentalGenericSync struct {
-	// Version is the config version
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
-
-	// Exports syncs a resource from the virtual cluster to the host
-	Exports []*Export `json:"export,omitempty" yaml:"export,omitempty"`
-
-	// Imports syncs a resource from the host cluster to virtual cluster
-	Imports []*Import `json:"import,omitempty" yaml:"import,omitempty"`
-
-	// Hooks are hooks that can be used to inject custom patches before syncing
-	Hooks *Hooks `json:"hooks,omitempty" yaml:"hooks,omitempty"`
-
-	ClusterRole ExperimentalGenericSyncExtraRules `json:"clusterRole,omitempty"`
-	Role        ExperimentalGenericSyncExtraRules `json:"role,omitempty"`
-}
-
-type ExperimentalGenericSyncExtraRules struct {
-	ExtraRules []interface{} `json:"extraRules,omitempty"`
-}
-
-type Hooks struct {
-	// HostToVirtual is a hook that is executed before syncing from the host to the virtual cluster
-	HostToVirtual []*Hook `json:"hostToVirtual,omitempty" yaml:"hostToVirtual,omitempty"`
-
-	// VirtualToHost is a hook that is executed before syncing from the virtual to the host cluster
-	VirtualToHost []*Hook `json:"virtualToHost,omitempty" yaml:"virtualToHost,omitempty"`
-}
-
-type Hook struct {
-	TypeInformation
-
-	// Verbs are the verbs that the hook should mutate
-	Verbs []string `json:"verbs,omitempty" yaml:"verbs,omitempty"`
-
-	// Patches are the patches to apply on the object to be synced
-	Patches []*Patch `json:"patches,omitempty" yaml:"patches,omitempty"`
-}
-
-type Import struct {
-	SyncBase `json:",inline" yaml:",inline"`
-}
-
-type SyncBase struct {
-	TypeInformation `json:",inline" yaml:",inline"`
-
-	Optional bool `json:"optional,omitempty" yaml:"optional,omitempty"`
-
-	// ReplaceWhenInvalid determines if the controller should try to recreate the object
-	// if there is a problem applying
-	ReplaceWhenInvalid bool `json:"replaceOnConflict,omitempty" yaml:"replaceOnConflict,omitempty"`
-
-	// Patches are the patches to apply on the virtual cluster objects
-	// when syncing them from the host cluster
-	Patches []*Patch `json:"patches,omitempty" yaml:"patches,omitempty"`
-
-	// ReversePatches are the patches to apply to host cluster objects
-	// after it has been synced to the virtual cluster
-	ReversePatches []*Patch `json:"reversePatches,omitempty" yaml:"reversePatches,omitempty"`
-}
-
-type Export struct {
-	SyncBase `json:",inline" yaml:",inline"`
-
-	// Selector is a label selector to select the synced objects in the virtual cluster.
-	// If empty, all objects will be synced.
-	Selector *Selector `json:"selector,omitempty" yaml:"selector,omitempty"`
-}
-
-type TypeInformation struct {
-	// APIVersion of the object to sync
-	APIVersion string `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"`
-
-	// Kind of the object to sync
-	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
-}
-
-type Selector struct {
-	// LabelSelector are the labels to select the object from
-	LabelSelector map[string]string `json:"labelSelector,omitempty" yaml:"labelSelector,omitempty"`
-}
-
-type Patch struct {
-	// Operation is the type of the patch
-	Operation PatchType `json:"op,omitempty" yaml:"op,omitempty"`
-
-	// FromPath is the path from the other object
-	FromPath string `json:"fromPath,omitempty" yaml:"fromPath,omitempty"`
-
-	// Path is the path of the patch
-	Path string `json:"path,omitempty" yaml:"path,omitempty"`
-
-	// NamePath is the path to the name of a child resource within Path
-	NamePath string `json:"namePath,omitempty" yaml:"namePath,omitempty"`
-
-	// NamespacePath is path to the namespace of a child resource within Path
-	NamespacePath string `json:"namespacePath,omitempty" yaml:"namespacePath,omitempty"`
-
-	// Value is the new value to be set to the path
-	Value interface{} `json:"value,omitempty" yaml:"value,omitempty"`
-
-	// Regex - is regular expresion used to identify the Name,
-	// and optionally Namespace, parts of the field value that
-	// will be replaced with the rewritten Name and/or Namespace
-	Regex       string         `json:"regex,omitempty" yaml:"regex,omitempty"`
-	ParsedRegex *regexp.Regexp `json:"-"               yaml:"-"`
-
-	// Conditions are conditions that must be true for
-	// the patch to get executed
-	Conditions []*PatchCondition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
-
-	// Ignore determines if the path should be ignored if handled as a reverse patch
-	Ignore *bool `json:"ignore,omitempty" yaml:"ignore,omitempty"`
-
-	// Sync defines if a specialized syncer should be initialized using values
-	// from the rewriteName operation as Secret/Configmap names to be synced
-	Sync *PatchSync `json:"sync,omitempty" yaml:"sync,omitempty"`
-}
-
-type PatchType string
-
-const (
-	PatchTypeRewriteName                     PatchType = "rewriteName"
-	PatchTypeRewriteLabelKey                 PatchType = "rewriteLabelKey"
-	PatchTypeRewriteLabelSelector            PatchType = "rewriteLabelSelector"
-	PatchTypeRewriteLabelExpressionsSelector PatchType = "rewriteLabelExpressionsSelector"
-
-	PatchTypeCopyFromObject PatchType = "copyFromObject"
-	PatchTypeAdd            PatchType = "add"
-	PatchTypeReplace        PatchType = "replace"
-	PatchTypeRemove         PatchType = "remove"
-)
-
-type PatchCondition struct {
-	// Path is the path within the object to select
-	Path string `json:"path,omitempty" yaml:"path,omitempty"`
-
-	// SubPath is the path below the selected object to select
-	SubPath string `json:"subPath,omitempty" yaml:"subPath,omitempty"`
-
-	// Equal is the value the path should be equal to
-	Equal interface{} `json:"equal,omitempty" yaml:"equal,omitempty"`
-
-	// NotEqual is the value the path should not be equal to
-	NotEqual interface{} `json:"notEqual,omitempty" yaml:"notEqual,omitempty"`
-
-	// Empty means that the path value should be empty or unset
-	Empty *bool `json:"empty,omitempty" yaml:"empty,omitempty"`
-}
-
-type PatchSync struct {
-	Secret    *bool `json:"secret,omitempty"    yaml:"secret,omitempty"`
-	ConfigMap *bool `json:"configmap,omitempty" yaml:"configmap,omitempty"`
 }
 
 type DenyRule struct {

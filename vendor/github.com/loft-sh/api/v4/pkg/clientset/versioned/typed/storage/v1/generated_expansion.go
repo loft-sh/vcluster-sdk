@@ -22,9 +22,15 @@ type DevPodWorkspaceTemplateExpansion interface{}
 
 type NetworkPeerExpansion interface{}
 
-type ProjectExpansion interface{}
+type NodeClaimExpansion interface{}
 
-type RunnerExpansion interface{}
+type NodeEnvironmentExpansion interface{}
+
+type NodeProviderExpansion interface{}
+
+type NodeTypeExpansion interface{}
+
+type ProjectExpansion interface{}
 
 type SharedSecretExpansion interface{}
 
