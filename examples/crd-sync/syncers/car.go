@@ -49,7 +49,7 @@ func (s *carSyncer) Syncer() synctypes.Sync[client.Object] {
 var _ synctypes.ControllerStarter = &carSyncer{}
 
 func (s *carSyncer) Register(ctx *synccontext.RegisterContext) error {
-	_, _, err := translate.EnsureCRDFromPhysicalCluster(ctx.Context, ctx.PhysicalManager.GetConfig(), ctx.VirtualManager.GetConfig(), examplev1.GroupVersion.WithKind("Car"))
+	_, _, err := translate.EnsureCRDFromPhysicalCluster(ctx.Context, ctx.HostManager.GetConfig(), ctx.VirtualManager.GetConfig(), examplev1.GroupVersion.WithKind("Car"))
 	return err
 }
 
