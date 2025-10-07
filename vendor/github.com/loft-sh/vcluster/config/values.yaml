@@ -181,7 +181,7 @@ controlPlane:
           image:
             registry: "registry.k8s.io"
             repository: "etcd"
-            tag: "3.5.21-0"
+            tag: "3.6.4-0"
           imagePullPolicy: ""
           extraArgs: []
           env: []
@@ -472,6 +472,8 @@ deploy:
     defaultIngressClass: true
   metricsServer:
     enabled: false
+  volumeSnapshotController:
+    enabled: false
 
 integrations:
   metricsServer:
@@ -496,14 +498,6 @@ integrations:
           enabled: false
           selector:
             matchLabels: {}
-      externalSecrets:
-        enabled: true
-      stores:
-        enabled: false
-      clusterStores:
-        enabled: false
-        selector:
-          labels: {}
   kubeVirt:
     enabled: false
     webhook:
@@ -648,7 +642,6 @@ plugins: {}
 
 experimental:
   syncSettings:
-    targetNamespace: ""
     setOwner: true
 
   deploy:

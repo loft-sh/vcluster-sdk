@@ -298,10 +298,19 @@ type Deploy struct {
 
 	// MetricsServer holds dedicated metrics server configuration.
 	MetricsServer DeployMetricsServer `json:"metricsServer,omitempty"`
+
+	// VolumeSnapshotController holds dedicated CSI snapshot-controller configuration.
+	VolumeSnapshotController VolumeSnapshotController `json:"volumeSnapshotController,omitempty"`
 }
 
 type DeployMetricsServer struct {
 	// Enabled defines if metrics server should be enabled.
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+// VolumeSnapshotController defines CSI volumes snapshot-controller configuration.
+type VolumeSnapshotController struct {
+	// Enabled defines if the CSI volumes snapshot-controller should be enabled.
 	Enabled bool `json:"enabled,omitempty"`
 }
 
@@ -737,20 +746,6 @@ type ExternalSecretsSync struct {
 	ToHost ExternalSecretsSyncToHostConfig `json:"toHost,omitempty"`
 	// FromHost defines what resources are synced from the host cluster to the virtual cluster
 	FromHost ExternalSecretsSyncFromHostConfig `json:"fromHost,omitempty"`
-	// ExternalSecrets defines if external secrets should get synced from the virtual cluster to the host cluster.
-	ExternalSecrets EnableSwitch `json:"externalSecrets,omitempty"`
-	// Stores defines if secret stores should get synced from the virtual cluster to the host cluster and then bi-directionally.
-	// Deprecated: Use Integrations.ExternalSecrets.Sync.ToHost.Stores instead.
-	Stores EnableSwitch `json:"stores,omitempty"`
-	// ClusterStores defines if cluster secrets stores should get synced from the host cluster to the virtual cluster.
-	// Deprecated: Use Integrations.ExternalSecrets.Sync.FromHost.ClusterStores instead.
-	ClusterStores ClusterStoresSyncConfig `json:"clusterStores,omitempty"`
-}
-
-type ClusterStoresSyncConfig struct {
-	EnableSwitch
-	// Selector defines what cluster stores should be synced
-	Selector LabelSelector `json:"selector,omitempty"`
 }
 
 type ExternalSecretsSyncToHostConfig struct {
@@ -2904,10 +2899,6 @@ func (e Experimental) JSONSchemaExtend(base *jsonschema.Schema) {
 }
 
 type ExperimentalSyncSettings struct {
-	// TargetNamespace is the namespace where the workloads should get synced to.
-	// Deprecated: Removed in 0.29.0.
-	TargetNamespace string `json:"targetNamespace,omitempty"`
-
 	// SetOwner specifies if vCluster should set an owner reference on the synced objects to the vCluster service. This allows for easy garbage collection.
 	SetOwner bool `json:"setOwner,omitempty"`
 

@@ -30,6 +30,12 @@ var allowedPodSecurityStandards = map[string]bool{
 	"restricted": true,
 }
 
+var (
+	errExportKubeConfigBothSecretAndAdditionalSecretsSet       = errors.New("exportKubeConfig.Secret and exportKubeConfig.AdditionalSecrets cannot be set at the same time")
+	errExportKubeConfigAdditionalSecretWithoutNameAndNamespace = errors.New("additional secret must have name and/or namespace set")
+	errExportKubeConfigServerNotValid                          = errors.New("exportKubeConfig.Server has to be set to a valid URL (with https:// or http:// prefix)")
+)
+
 func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 	// check the value of pod security standard
 	if vConfig.Policies.PodSecurityStandard != "" && !allowedPodSecurityStandards[vConfig.Policies.PodSecurityStandard] {
@@ -195,6 +201,12 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 
 	// validate sync.fromHost classes
 	err = ValidateSyncFromHostClasses(vConfig.Config.Sync.FromHost)
+	if err != nil {
+		return err
+	}
+
+	// validate deploy.volumeSnapshotController
+	err = ValidateVolumeSnapshotController(vConfig.Config.Deploy.VolumeSnapshotController, vConfig.PrivateNodes)
 	if err != nil {
 		return err
 	}
@@ -581,11 +593,6 @@ func validateFromHostSyncMappingObjectName(objRef []string, resourceNamePlural s
 	return nil
 }
 
-var (
-	errExportKubeConfigBothSecretAndAdditionalSecretsSet       = errors.New("exportKubeConfig.Secret and exportKubeConfig.AdditionalSecrets cannot be set at the same time")
-	errExportKubeConfigAdditionalSecretWithoutNameAndNamespace = errors.New("additional secret must have name and/or namespace set")
-)
-
 func validateExportKubeConfig(exportKubeConfig config.ExportKubeConfig) error {
 	// You cannot set both Secret and AdditionalSecrets at the same time.
 	if exportKubeConfig.Secret.IsSet() && len(exportKubeConfig.AdditionalSecrets) > 0 {
@@ -596,6 +603,21 @@ func validateExportKubeConfig(exportKubeConfig config.ExportKubeConfig) error {
 		if additionalSecret.Name == "" && additionalSecret.Namespace == "" {
 			return errExportKubeConfigAdditionalSecretWithoutNameAndNamespace
 		}
+	}
+
+	if err := validateExportKubeConfigServer(exportKubeConfig.Server); err != nil {
+		return errExportKubeConfigServerNotValid
+	}
+	return nil
+}
+
+func validateExportKubeConfigServer(server string) error {
+	if server == "" {
+		return nil
+	}
+	hasProto := strings.HasPrefix(server, "https://") || strings.HasPrefix(server, "http://")
+	if _, err := url.Parse(server); err != nil || !hasProto {
+		return errExportKubeConfigServerNotValid
 	}
 	return nil
 }
@@ -669,9 +691,9 @@ func validateExternalSecretsEnabled(
 	}
 	for crdName, crdConfig := range toHostCustomResources {
 		if crdConfig.Enabled &&
-			(crdName == "externalsecrets.external-secrets.io" && externalSecretsIntegration.Sync.ExternalSecrets.Enabled ||
-				crdName == "secretstores.external-secrets.io" && externalSecretsIntegration.Sync.Stores.Enabled ||
-				crdName == "clustersecretstores.external-secrets.io" && externalSecretsIntegration.Sync.ClusterStores.Enabled) {
+			(crdName == "externalsecrets.external-secrets.io" && externalSecretsIntegration.Enabled ||
+				crdName == "secretstores.external-secrets.io" && externalSecretsIntegration.Sync.ToHost.Stores.Enabled ||
+				crdName == "clustersecretstores.external-secrets.io" && externalSecretsIntegration.Sync.FromHost.ClusterStores.Enabled) {
 			return fmt.Errorf("external-secrets integration is enabled but external-secrets custom resource (%s) is also set in the sync.toHost.customResources. "+
 				"This is not supported, please remove the entry from sync.toHost.customResources", crdName)
 		}
@@ -787,6 +809,13 @@ func validatePrivatedNodesMode(vConfig *VirtualClusterConfig) error {
 		}
 	}
 
+	return nil
+}
+
+func ValidateVolumeSnapshotController(volumeSnapshotController config.VolumeSnapshotController, privateNodes config.PrivateNodes) error {
+	if volumeSnapshotController.Enabled && !privateNodes.Enabled {
+		return fmt.Errorf("volume snapshot-controller is only supported with private nodes")
+	}
 	return nil
 }
 
