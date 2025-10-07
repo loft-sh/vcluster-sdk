@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	vclusterconfig "github.com/loft-sh/vcluster/config"
-	"github.com/loft-sh/vcluster/pkg/controllers/generic"
 	"github.com/loft-sh/vcluster/pkg/controllers/servicesync"
 	"github.com/loft-sh/vcluster/pkg/syncer"
 	"github.com/loft-sh/vcluster/pkg/syncer/synccontext"
@@ -59,12 +58,6 @@ func RegisterControllers(ctx *synccontext.ControllerContext, syncers []syncertyp
 		return err
 	}
 
-	// register generic sync controllers
-	err = registerGenericSyncController(ctx)
-	if err != nil {
-		return err
-	}
-
 	// register controllers for resource synchronization
 	for _, v := range syncers {
 		// fake syncer?
@@ -98,24 +91,10 @@ func RegisterControllers(ctx *synccontext.ControllerContext, syncers []syncertyp
 	return nil
 }
 
-func registerGenericSyncController(ctx *synccontext.ControllerContext) error {
-	err := generic.CreateExporters(ctx)
-	if err != nil {
-		return err
-	}
-
-	err = generic.CreateImporters(ctx)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func registerServiceSyncControllers(ctx *synccontext.ControllerContext) error {
-	hostNamespace := ctx.Config.WorkloadTargetNamespace
+	hostNamespace := ctx.Config.HostTargetNamespace
 	if ctx.Config.Sync.ToHost.Namespaces.Enabled {
-		hostNamespace = ctx.Config.WorkloadNamespace
+		hostNamespace = ctx.Config.HostNamespace
 	}
 
 	if len(ctx.Config.Networking.ReplicateServices.FromHost) > 0 {
@@ -126,10 +105,10 @@ func registerServiceSyncControllers(ctx *synccontext.ControllerContext) error {
 
 		// sync we are syncing from arbitrary physical namespaces we need to create a new
 		// manager that listens on global services
-		globalLocalManager, err := ctrl.NewManager(ctx.LocalManager.GetConfig(), ctrl.Options{
-			Scheme: ctx.LocalManager.GetScheme(),
+		globalLocalManager, err := ctrl.NewManager(ctx.HostManager.GetConfig(), ctrl.Options{
+			Scheme: ctx.HostManager.GetScheme(),
 			MapperProvider: func(_ *rest.Config, _ *http.Client) (meta.RESTMapper, error) {
-				return ctx.LocalManager.GetRESTMapper(), nil
+				return ctx.HostManager.GetRESTMapper(), nil
 			},
 			Metrics:        metricsserver.Options{BindAddress: "0"},
 			LeaderElection: false,
@@ -183,7 +162,7 @@ func registerServiceSyncControllers(ctx *synccontext.ControllerContext) error {
 			SyncServices:          mapping,
 			IsVirtualToHostSyncer: true,
 			From:                  ctx.VirtualManager,
-			To:                    ctx.LocalManager,
+			To:                    ctx.HostManager,
 			Log:                   loghelper.New(name),
 		}
 

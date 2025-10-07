@@ -23,7 +23,7 @@ import (
 var carCRD string
 
 func NewCarSyncer(ctx *synccontext.RegisterContext) (syncertypes.Base, error) {
-	err := util.EnsureCRD(ctx.Context, ctx.PhysicalManager.GetConfig(), []byte(carCRD), examplev1.SchemeGroupVersion.WithKind("Car"))
+	err := util.EnsureCRD(ctx.Context, ctx.HostManager.GetConfig(), []byte(carCRD), examplev1.SchemeGroupVersion.WithKind("Car"))
 	if err != nil {
 		return nil, err
 	}

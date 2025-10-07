@@ -4,6 +4,7 @@ import (
 	auditv1 "github.com/loft-sh/api/v4/pkg/apis/audit/v1"
 	storagev1 "github.com/loft-sh/api/v4/pkg/apis/storage/v1"
 	uiv1 "github.com/loft-sh/api/v4/pkg/apis/ui/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -76,6 +77,12 @@ type ConfigStatus struct {
 
 	// CostControl holds the settings related to the Cost Control ROI dashboard and its metrics gathering infrastructure
 	CostControl *CostControl `json:"costControl,omitempty"`
+
+	// PlatformDB holds the settings related to the postgres database that platform uses to store data
+	PlatformDB *PlatformDB `json:"platformDB,omitempty"`
+
+	// ImageBuilder holds the settings related to the image builder
+	ImageBuilder *ImageBuilder `json:"imageBuilder,omitempty"`
 }
 
 // Audit holds the audit configuration options for loft. Changing any options will require a loft restart
@@ -665,6 +672,10 @@ type AuthenticationOIDC struct {
 	// +optional
 	EmailClaim string `json:"emailClaim,omitempty"`
 
+	// AllowedExtraClaims are claims of interest that are not part of User by default but may be provided by the OIDC provider.
+	// +optional
+	AllowedExtraClaims []string `json:"allowedExtraClaims,omitempty"`
+
 	// UsernamePrefix, if specified, causes claims mapping to username to be prefix with
 	// the provided value. A value "oidc:" would result in usernames like "oidc:john".
 	// +optional
@@ -736,6 +747,11 @@ type CostControl struct {
 	Settings *CostControlSettings `json:"settings,omitempty"`
 }
 
+type PlatformDB struct {
+	// StorageClass sets the storage class for the PersistentVolumeClaim used by the platform database statefulSet.
+	StorageClass string `json:"storageClass,omitempty"`
+}
+
 type CostControlGlobalConfig struct {
 	// Metrics these settings apply to metric infrastructure used to aggregate metrics across all connected clusters
 	Metrics *storagev1.Metrics `json:"metrics,omitempty"`
@@ -782,4 +798,16 @@ type CostControlResourcePrice struct {
 
 	// TimePeriod specifies the time period for the price.
 	TimePeriod string `json:"timePeriod,omitempty"`
+}
+
+type ImageBuilder struct {
+	// Enabled specifies whether the remote image builder should be available.
+	// If it's not available building ad-hoc images from a devcontainer.json is not supported
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Replicas is the number of desired replicas.
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Resources are compute resource required by the buildkit containers
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }

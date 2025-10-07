@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/loft-sh/vcluster/config"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -259,7 +258,6 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 		}
 	}
 
-	newConfig.Experimental.IsolatedControlPlane.Headless = oldConfig.Headless
 	newConfig.ControlPlane.Advanced.DefaultImageRegistry = strings.TrimSuffix(oldConfig.DefaultImageRegistry, "/")
 
 	if len(oldConfig.Plugin) > 0 {
@@ -620,13 +618,7 @@ func convertBaseValues(oldConfig BaseHelm, newConfig *config.Config) error {
 		newConfig.Sync.FromHost.CSIDrivers.Enabled = config.StrBool(strconv.FormatBool(*oldConfig.Sync.CSIDrivers.Enabled))
 	}
 	if oldConfig.Sync.Generic.Config != "" {
-		genericSyncConfig := &config.ExperimentalGenericSync{}
-		err := yaml.Unmarshal([]byte(oldConfig.Sync.Generic.Config), genericSyncConfig)
-		if err != nil {
-			return fmt.Errorf("decode sync.generic.config: %w", err)
-		}
-
-		newConfig.Experimental.GenericSync = *genericSyncConfig
+		return fmt.Errorf("generic sync is no longer supported, please use sync.toHost.customResources and sync.fromHost.customResources instead")
 	}
 
 	return nil
@@ -766,21 +758,11 @@ func migrateFlag(distro, key, value string, newConfig *config.Config) error {
 	case "pro-license-secret":
 		return fmt.Errorf("cannot be used directly, use proLicenseSecret value")
 	case "remote-kube-config":
-		if value == "" {
-			return fmt.Errorf("value is missing")
-		}
-		newConfig.Experimental.IsolatedControlPlane.Enabled = true
-		newConfig.Experimental.IsolatedControlPlane.KubeConfig = value
+		return fmt.Errorf("this feature is not supported anymore")
 	case "remote-namespace":
-		if value == "" {
-			return fmt.Errorf("value is missing")
-		}
-		newConfig.Experimental.IsolatedControlPlane.Namespace = value
+		return fmt.Errorf("this feature is not supported anymore")
 	case "remote-service-name":
-		if value == "" {
-			return fmt.Errorf("value is missing")
-		}
-		newConfig.Experimental.IsolatedControlPlane.Service = value
+		return fmt.Errorf("this feature is not supported anymore")
 	case "integrated-coredns":
 		return fmt.Errorf("cannot be used directly")
 	case "use-coredns-plugin":

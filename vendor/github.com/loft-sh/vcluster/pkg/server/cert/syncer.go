@@ -31,7 +31,7 @@ func NewSyncer(ctx *synccontext.ControllerContext) (Syncer, error) {
 		serverCaCert: ctx.Config.VirtualClusterKubeConfig().ServerCACert,
 
 		vClient:                 ctx.VirtualManager.GetClient(),
-		workloadNamespaceClient: ctx.WorkloadNamespaceClient,
+		workloadNamespaceClient: ctx.HostNamespaceClient,
 		vConfig:                 ctx.Config,
 
 		listeners: []dynamiccertificates.Listener{},
@@ -81,7 +81,7 @@ func (s *syncer) RunOnce(ctx context.Context) error {
 }
 
 func (s *syncer) regen(ctx context.Context) (bool, error) {
-	cert, key, extraSANs, err := genAPIServerServingCerts(ctx, s.workloadNamespaceClient, s.vClient, s.vConfig, s.serverCaCert, s.serverCaKey, s.currentCert, s.currentKey)
+	cert, key, extraSANs, err := GenAPIServerServingCerts(ctx, s.workloadNamespaceClient, s.vClient, s.vConfig, s.serverCaCert, s.serverCaKey, s.currentCert, s.currentKey)
 	if err != nil {
 		return false, err
 	}

@@ -41,6 +41,10 @@ type UISettingsSpec struct {
 	// DefaultVClusterVersion is the default version of vClusters
 	DefaultVClusterVersion string `json:"defaultVClusterVersion,omitempty"`
 
+	// AvailableVClusterVersions lists all virtual cluster versions available to the platform instance
+	// +optional
+	AvailableVClusterVersions []VClusterVersion `json:"availableVClusterVersions,omitempty"`
+
 	// LoftHosted indicates whether the vCluster Platform instance
 	// is hosted and operated by Loft Labs Inc.
 	LoftHosted bool `json:"loftHosted,omitempty"`
@@ -82,6 +86,24 @@ type UISettingsConfig struct {
 	// NavBarButtons holds extra nav bar buttons
 	// +optional
 	NavBarButtons []NavBarButton `json:"navBarButtons,omitempty"`
+	// External URLs that can be called from the UI
+	// +optional
+	ExternalURLs ExternalURLs `json:"externalURLs,omitempty"`
+}
+
+type ExternalURLs struct {
+	// Block determines if requests to external URLs from the UI should be blocked
+	// +optional
+	Block bool `json:"block,omitempty"`
+
+	// Allow specifies which external URLs can be called. In addition to the predefined modules,
+	// - "vcluster" (license page, feature descriptions, ...)
+	// - "gtm" (google tag manager)
+	// - "featurebase" (changelog)
+	// any URL can be added to this list. This will allow the UI to make any request to this URL.
+	// This is only active when Block is true.
+	// +optional
+	Allow []string `json:"allow,omitempty"`
 }
 
 type NavBarButton struct {
@@ -101,4 +123,29 @@ type NavBarButton struct {
 }
 
 // UISettingsStatus holds the status
-type UISettingsStatus struct{}
+type UISettingsStatus struct {
+	// Csps holds Content Security Policies
+	// +optional
+	Csps Csps `json:"csps,omitempty"`
+
+	// CspConfig holds the raw csp config from the user
+	// +optional
+	CspConfig string `json:"cspConfig,omitempty"`
+}
+
+type Csps map[string]CspPolicy
+
+type CspPolicy struct {
+	Script  string
+	Connect string
+	Frame   string
+	Font    string
+}
+
+type VClusterVersion struct {
+	// TagName is the full tag name
+	Tag string `json:"tagName,omitempty"`
+
+	// PreRelease determines if the version is marked as prerelease
+	PreRelease bool `json:"prerelease,omitempty"`
+}

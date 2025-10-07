@@ -105,7 +105,7 @@ controlPlane:
       image:
         registry: ghcr.io
         repository: "loft-sh/kubernetes"
-        tag: "v1.33.1"
+        tag: "v1.33.4"
       apiServer:
         enabled: true
         command: []
@@ -136,7 +136,7 @@ controlPlane:
       image:
         registry: ""
         repository: "rancher/k3s"
-        tag: "v1.33.1-k3s1"
+        tag: "v1.33.3-k3s1"
       securityContext: {}
       resources:
         limits:
@@ -288,9 +288,6 @@ controlPlane:
 
   standalone:
     dataDir: "/var/lib/vcluster"
-    bundleRepository: "https://github.com/loft-sh/kubernetes/releases/download"
-    syncConfig:
-      enabled: true
     joinNode:
       enabled: true
       containerd:
@@ -315,7 +312,7 @@ controlPlane:
         ephemeral-storage: 8Gi
         memory: 2Gi
       requests:
-        ephemeral-storage: 400Mi
+        ephemeral-storage: 1Gi
         cpu: 200m
         memory: 256Mi
 
@@ -422,6 +419,9 @@ controlPlane:
         extraEnv: []
         extraArgs: []
 
+    cloudControllerManager:
+      enabled: true
+
     registry:
       enabled: false
       anonymousPull: true
@@ -440,7 +440,13 @@ privateNodes:
   joinNode:
     containerd:
       enabled: true
-
+  autoNodes:
+    static: []
+    dynamic: []
+  vpn:
+    enabled: false
+    nodeToNode:
+      enabled: false
 deploy:
   localPathProvisioner:
     enabled: true
@@ -645,9 +651,6 @@ experimental:
     targetNamespace: ""
     setOwner: true
 
-  isolatedControlPlane:
-    headless: false
-
   deploy:
     host:
       manifests: ""
@@ -656,12 +659,6 @@ experimental:
       manifests: ""
       manifestsTemplate: ""
       helm: []
-
-  genericSync:
-    clusterRole:
-      extraRules: []
-    role:
-      extraRules: []
 
 telemetry:
   enabled: true

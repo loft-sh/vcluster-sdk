@@ -146,12 +146,8 @@ func (m *manager) InitWithOptions(options Options) (*synccontext.RegisterContext
 		return nil, errors.Wrap(err, "unmarshal vCluster config")
 	}
 
-	// parse workload & control plane client
-	virtualClusterConfig.WorkloadConfig, err = bytesToRestConfig(initConfig.WorkloadConfig)
-	if err != nil {
-		return nil, fmt.Errorf("parse workload config: %w", err)
-	}
-	virtualClusterConfig.ControlPlaneConfig, err = bytesToRestConfig(initConfig.ControlPlaneConfig)
+	// parse host client
+	virtualClusterConfig.HostConfig, err = bytesToRestConfig(initConfig.ControlPlaneConfig)
 	if err != nil {
 		return nil, fmt.Errorf("parse control plane config: %w", err)
 	}
@@ -307,7 +303,7 @@ func (m *manager) start() error {
 
 	// start the local manager
 	go func() {
-		err := m.context.PhysicalManager.Start(m.context)
+		err := m.context.HostManager.Start(m.context)
 		if err != nil {
 			klog.Errorf("Starting physical manager: %v", err)
 			Exit(1)
@@ -324,7 +320,7 @@ func (m *manager) start() error {
 	}()
 
 	// Wait for caches to be synced
-	m.context.PhysicalManager.GetCache().WaitForCacheSync(m.context)
+	m.context.HostManager.GetCache().WaitForCacheSync(m.context)
 	m.context.VirtualManager.GetCache().WaitForCacheSync(m.context)
 
 	// migrate syncers before starting the controllers
