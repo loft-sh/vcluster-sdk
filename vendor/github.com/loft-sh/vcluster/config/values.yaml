@@ -7,6 +7,8 @@ sync:
       enabled: true
     endpoints:
       enabled: true
+    endpointSlices:
+        enabled: true
     persistentVolumeClaims:
       enabled: true
     configMaps:
@@ -105,7 +107,7 @@ controlPlane:
       image:
         registry: ghcr.io
         repository: "loft-sh/kubernetes"
-        tag: "v1.33.4"
+        tag: "v1.34.0"
       apiServer:
         enabled: true
         command: []
@@ -136,7 +138,7 @@ controlPlane:
       image:
         registry: ""
         repository: "rancher/k3s"
-        tag: "v1.33.3-k3s1"
+        tag: "v1.34.1-k3s1"
       securityContext: {}
       resources:
         limits:
@@ -155,6 +157,7 @@ controlPlane:
         enabled: false
         dataSource: ""
         connector: ""
+        identityProvider: ""
         certFile: ""
         keyFile: ""
         caFile: ""
@@ -309,8 +312,8 @@ controlPlane:
 
     resources:
       limits:
-        ephemeral-storage: 8Gi
-        memory: 2Gi
+        ephemeral-storage: 10Gi
+        memory: 4Gi
       requests:
         ephemeral-storage: 1Gi
         cpu: 200m
@@ -376,6 +379,9 @@ controlPlane:
         timeoutSeconds: 3
         periodSeconds: 6
 
+    initContainers: []
+    sidecarContainers: []
+
   serviceMonitor:
     enabled: false
     labels: {}
@@ -427,6 +433,9 @@ controlPlane:
       anonymousPull: true
       config: {}
 
+    kubeVip:
+      enabled: false
+
     globalMetadata:
       annotations: {}
 
@@ -440,9 +449,7 @@ privateNodes:
   joinNode:
     containerd:
       enabled: true
-  autoNodes:
-    static: []
-    dynamic: []
+  autoNodes: []
   vpn:
     enabled: false
     nodeToNode:
@@ -548,6 +555,8 @@ rbac:
     enabled: auto
     overwriteRules: []
     extraRules: []
+  enableVolumeSnapshotRules:
+    enabled: auto
 
 networking:
   podCIDR: "10.244.0.0/16"

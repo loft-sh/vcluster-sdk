@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -26,7 +25,7 @@ const (
 	minAsyncSnapshotVersion = "0.29.0-alpha.1"
 )
 
-func Snapshot(ctx context.Context, args []string, globalFlags *flags.GlobalFlags, snapshotOpts *snapshot.Options, podOptions *pod.Options, log log.Logger, async bool) error {
+func CreateSnapshot(ctx context.Context, args []string, globalFlags *flags.GlobalFlags, snapshotOpts *snapshot.Options, podOptions *pod.Options, log log.Logger, async bool) error {
 	// init kube client and vCluster
 	vCluster, kubeClient, restConfig, err := initSnapshotCommand(ctx, args, globalFlags, snapshotOpts, log)
 	if err != nil {
@@ -60,6 +59,31 @@ func Snapshot(ctx context.Context, args []string, globalFlags *flags.GlobalFlags
 	err = createSnapshotRequest(ctx, vCluster, kubeClient, snapshotOpts, log)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+func GetSnapshots(ctx context.Context, args []string, globalFlags *flags.GlobalFlags, snapshotOpts *snapshot.Options, log log.Logger) error {
+	// init kube client and vCluster
+	vCluster, kubeClient, restConfig, err := initSnapshotCommand(ctx, args, globalFlags, snapshotOpts, log)
+	if err != nil {
+		return fmt.Errorf("failed to init snapshot command: %w", err)
+	}
+
+	if snapshotOpts.Type == "container" {
+		podOptions := &pod.Options{
+			Exec: true,
+		}
+		err = pod.RunSnapshotPod(ctx, restConfig, kubeClient, []string{"/vcluster", "snapshot", "get"}, vCluster, podOptions, snapshotOpts, log)
+		if err != nil {
+			return fmt.Errorf("failed to run snapshot pod: %w", err)
+		}
+		return nil
+	}
+
+	err = snapshot.GetSnapshots(ctx, vCluster.Namespace, snapshotOpts, kubeClient, log)
+	if err != nil {
+		return fmt.Errorf("failed to list snapshots: %w", err)
 	}
 	return nil
 }
@@ -130,44 +154,20 @@ func initSnapshotCommand(
 }
 
 func createSnapshotRequest(ctx context.Context, vCluster *find.VCluster, kubeClient *kubernetes.Clientset, snapshotOpts *snapshot.Options, log log.Logger) error {
-	vClusterConfig, err := getVClusterConfig(ctx, vCluster, kubeClient, snapshotOpts)
-	if err != nil {
-		return err
-	}
-	if vClusterConfig.ControlPlane.Standalone.Enabled {
-		return errors.New("creating snapshots with 'vcluster snapshot create' command is currently not supported")
-	}
-	err = checkIfVClusterSupportsSnapshotRequests(vCluster, log)
+	err := checkIfVClusterSupportsSnapshotRequests(vCluster, log)
 	if err != nil {
 		return fmt.Errorf("vCluster version check failed: %w", err)
 	}
-
-	// first create the snapshot options Secret
-	secret, err := snapshot.CreateSnapshotOptionsSecret(vCluster.Namespace, vCluster.Name, snapshotOpts)
+	vClusterConfig, err := getVClusterConfig(ctx, vCluster, kubeClient, snapshotOpts)
 	if err != nil {
-		return fmt.Errorf("failed to create snapshot options Secret: %w", err)
+		return fmt.Errorf("failed to get vcluster config: %w", err)
 	}
-	secret.GenerateName = fmt.Sprintf("%s-snapshot-request-", vCluster.Name)
-	secret, err = kubeClient.CoreV1().Secrets(vCluster.Namespace).Create(ctx, secret, metav1.CreateOptions{})
+	// Create snapshot request resources
+	_, err = snapshot.CreateSnapshotRequestResources(ctx, vCluster.Namespace, vCluster.Name, vClusterConfig, snapshotOpts, kubeClient)
 	if err != nil {
-		return fmt.Errorf("failed to create snapshot options Secret: %w", err)
+		return fmt.Errorf("failed to create snapshot request resources: %w", err)
 	}
-
-	// then create the snapshot request that will be reconciled by the controller
-	snapshotRequest := &snapshot.Request{
-		Name: secret.Name,
-	}
-	configMap, err := snapshot.CreateSnapshotRequestConfigMap(vCluster.Namespace, vCluster.Name, snapshotRequest)
-	if err != nil {
-		return fmt.Errorf("failed to create snapshot request ConfigMap: %w", err)
-	}
-	configMap.Name = secret.Name
-	_, err = kubeClient.CoreV1().ConfigMaps(vCluster.Namespace).Create(ctx, configMap, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create snapshot request ConfigMap: %w", err)
-	}
-
-	log.Infof("Created snapshot request %s", snapshotRequest.Name)
+	log.Infof("Beginning snapshot creation... Check the snapshot status by running `vcluster snapshot get %s %s`", vCluster.Name, snapshotOpts.GetURL())
 	return nil
 }
 

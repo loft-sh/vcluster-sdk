@@ -27,7 +27,7 @@ import (
 
 var (
 	ErrMissingContainer = errors.New("missing container")
-	ErrLoftNotReachable = errors.New("product is not reachable")
+	ErrLoftNotReachable = errors.New("vCluster platform is not reachable")
 )
 
 type ContainerDetails struct {
@@ -60,7 +60,7 @@ type ContainerDetailsState struct {
 }
 
 func (l *LoftStarter) startDocker(ctx context.Context, name string) error {
-	l.Log.Infof(product.Replace("Starting loft in Docker..."))
+	l.Log.Infof("Starting vCluster platform in Docker...")
 
 	// prepare installation
 	err := l.prepareDocker()
@@ -97,15 +97,15 @@ func (l *LoftStarter) startDocker(ctx context.Context, name string) error {
 	}
 
 	// Install Loft
-	l.Log.Info(product.Replace("Welcome to Loft!"))
-	l.Log.Info(product.Replace("This installer will help you configure and deploy Loft."))
+	l.Log.Info("Welcome to vCluster platform!")
+	l.Log.Info("This installer will help you configure and deploy vCluster platform.")
 
 	// make sure we are ready for installing
 	containerID, err = l.runLoftInDocker(ctx, name)
 	if err != nil {
 		return err
 	} else if containerID == "" {
-		return fmt.Errorf("%w: %s", ErrMissingContainer, product.Replace("couldn't find Loft container after starting it"))
+		return fmt.Errorf("%w: %s", ErrMissingContainer, "couldn't find vCluster platform container after starting it")
 	}
 
 	return l.successDocker(ctx, containerID)
@@ -116,18 +116,18 @@ func (l *LoftStarter) successDocker(ctx context.Context, containerID string) err
 		return nil
 	}
 
-	// wait until Loft is ready
+	// wait until vCluster platform is ready
 	host, err := l.waitForLoftDocker(ctx, containerID)
 	if err != nil {
 		return err
 	}
 
 	// wait for domain to become reachable
-	l.Log.Infof(product.Replace("Wait for Loft to become available at %s..."), host)
+	l.Log.Infof("Wait for vCluster platform to become available at %s...", host)
 	err = wait.PollUntilContextTimeout(ctx, time.Second, time.Minute*10, true, func(ctx context.Context) (bool, error) {
 		containerDetails, err := l.inspectContainer(ctx, containerID)
 		if err != nil {
-			return false, fmt.Errorf("inspect loft container: %w", err)
+			return false, fmt.Errorf("inspect vCluster platform container: %w", err)
 		} else if strings.ToLower(containerDetails.State.Status) == "exited" || strings.ToLower(containerDetails.State.Status) == "dead" {
 			logs, _ := l.logsContainer(ctx, containerID)
 			return false, fmt.Errorf("container failed (status: %s):\n %s", containerDetails.State.Status, logs)
@@ -170,7 +170,7 @@ Thanks for using Loft!
 }
 
 func (l *LoftStarter) waitForLoftDocker(ctx context.Context, containerID string) (string, error) {
-	l.Log.Info(product.Replace("Wait for Loft to become available..."))
+	l.Log.Info("Wait for vCluster platform to become available...")
 
 	// check for local port
 	containerDetails, err := l.inspectContainer(ctx, containerID)
@@ -182,7 +182,7 @@ func (l *LoftStarter) waitForLoftDocker(ctx context.Context, containerID string)
 
 	// check if no tunnel
 	if l.NoTunnel {
-		return "", fmt.Errorf("%w: %s", ErrLoftNotReachable, product.Replace("cannot connect to Loft as it has no exposed port and --no-tunnel is enabled"))
+		return "", fmt.Errorf("%w: %s", ErrLoftNotReachable, "cannot connect to vCluster platform as it has no exposed port and --no-tunnel is enabled")
 	}
 
 	// wait for router
@@ -196,7 +196,7 @@ func (l *LoftStarter) waitForLoftDocker(ctx context.Context, containerID string)
 		return true, nil
 	})
 	if waitErr != nil {
-		return "", fmt.Errorf("error waiting for loft router domain: %w", err)
+		return "", fmt.Errorf("error waiting for vCluster platform router domain: %w", err)
 	}
 
 	return url, nil
@@ -252,12 +252,12 @@ func (l *LoftStarter) runLoftInDocker(ctx context.Context, name string) (string,
 	if l.Password != "" {
 		args = append(args, "--env", "ADMIN_PASSWORD_HASH="+hash.String(l.Password))
 	}
+	if l.Email != "" {
+		args = append(args, "--env", "ADMIN_EMAIL="+l.Email)
+	}
 
-	// run as root otherwise we get permission errors
-	args = append(args, "-u", "root")
-
-	// mount the loft lib
-	args = append(args, "-v", "loft-data:/var/lib/loft")
+	// mount the vCluster platform lib
+	args = append(args, "-v", "vcluster-platform:/var/lib/loft")
 
 	// set port
 	if l.LocalPort != "" {
@@ -271,12 +271,12 @@ func (l *LoftStarter) runLoftInDocker(ctx context.Context, name string) (string,
 	if l.DockerImage != "" {
 		args = append(args, l.DockerImage)
 	} else if l.Version != "" {
-		args = append(args, "ghcr.io/loft-sh/loft:"+strings.TrimPrefix(l.Version, "v"))
+		args = append(args, "ghcr.io/loft-sh/vcluster-platform:"+strings.TrimPrefix(l.Version, "v"))
 	} else {
-		args = append(args, "ghcr.io/loft-sh/loft:latest")
+		args = append(args, "ghcr.io/loft-sh/vcluster-platform:latest")
 	}
 
-	l.Log.Infof("Start Loft via 'docker %s'", strings.Join(args, " "))
+	l.Log.Infof("Start vCluster platform via 'docker %s'", strings.Join(args, " "))
 	runCmd := l.buildDockerCmd(ctx, args...)
 	runCmd.Stdout = os.Stdout
 	runCmd.Stderr = os.Stderr
@@ -363,8 +363,7 @@ func (l *LoftStarter) findLoftContainer(ctx context.Context, name string, onlyRu
 }
 
 func (l *LoftStarter) buildDockerCmd(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	return cmd
+	return exec.CommandContext(ctx, "docker", args...)
 }
 
 func WrapCommandError(stdout []byte, err error) error {

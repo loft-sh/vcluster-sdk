@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,29 +22,96 @@ import (
 	"github.com/loft-sh/vcluster/pkg/k8s"
 	"github.com/loft-sh/vcluster/pkg/mappings/store"
 	"github.com/loft-sh/vcluster/pkg/scheme"
+	setupconfig "github.com/loft-sh/vcluster/pkg/setup/config"
+	"github.com/loft-sh/vcluster/pkg/snapshot/volumes"
+	"github.com/loft-sh/vcluster/pkg/util/translate"
 	"go.etcd.io/etcd/server/v3/storage/backend"
 	"go.etcd.io/etcd/server/v3/storage/mvcc"
 	"go.etcd.io/etcd/server/v3/storage/schema"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/runtime/serializer/protobuf"
 	"k8s.io/klog/v2"
 )
 
+const (
+	pvPrefix  = "/registry/persistentvolumes/"
+	pvcPrefix = "/registry/persistentvolumeclaims/"
+)
+
 type RestoreClient struct {
-	Snapshot Options
+	snapshotRequest Request
+	Snapshot        Options
+	RestoreVolumes  bool
 
 	NewVCluster bool
+	vConfig     *config.VirtualClusterConfig
 }
 
 var (
 	podGVK = corev1.SchemeGroupVersion.WithKind("Pod")
+	pvcGVK = corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim")
 
 	// bump revision to make sure we invalidate caches. See https://github.com/kubernetes/kubernetes/issues/118501 for more details
 	BumpRevision = int64(1000)
 )
+
+func (o *RestoreClient) GetSnapshotRequest(ctx context.Context) (*Request, error) {
+	// make sure to validate options
+	err := Validate(&o.Snapshot, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// create store
+	objectStore, err := CreateStore(ctx, &o.Snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create store: %w", err)
+	}
+
+	// now stream objects from object store to etcd
+	reader, err := objectStore.GetObject(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get backup: %w", err)
+	}
+	defer reader.Close()
+
+	// optionally decompress
+	gzipReader, err := gzip.NewReader(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzipReader.Close()
+
+	// create a new tar reader
+	tarReader := tar.NewReader(gzipReader)
+
+	for {
+		// read from archive
+		key, value, err := readKeyValue(tarReader)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("read etcd key/value: %w", err)
+		} else if errors.Is(err, io.EOF) || len(key) == 0 {
+			break
+		}
+
+		if !strings.HasPrefix(string(key), RequestStoreKey) {
+			continue
+		}
+
+		var snapshotRequest Request
+		err = json.Unmarshal(value, &snapshotRequest)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal snapshot request: %w", err)
+		}
+		return &snapshotRequest, nil
+	}
+
+	return nil, ErrSnapshotRequestNotFound
+}
 
 func (o *RestoreClient) Run(ctx context.Context) (retErr error) {
 	// create decoder and encoder
@@ -61,6 +129,10 @@ func (o *RestoreClient) Run(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
+	o.vConfig = vConfig
+
+	// set global vCluster name
+	translate.VClusterName = vConfig.Name
 
 	// create store
 	objectStore, err := CreateStore(ctx, &o.Snapshot)
@@ -128,6 +200,17 @@ func (o *RestoreClient) Run(ctx context.Context) (retErr error) {
 			}
 		}
 
+		// check snapshot request
+		if strings.HasPrefix(string(key), RequestStoreKey) {
+			if o.RestoreVolumes {
+				err = o.createRestoreRequest(ctx, vConfig, value)
+				if err != nil {
+					return fmt.Errorf("failed to create restore request: %w", err)
+				}
+			}
+			continue
+		}
+
 		// transform pods to make sure they are not deleted on start
 		if strings.HasPrefix(string(key), "/registry/pods/") {
 			// we need to only do this in shared nodes mode as otherwise kubelet will not update the status correctly
@@ -139,7 +222,20 @@ func (o *RestoreClient) Run(ctx context.Context) (retErr error) {
 			}
 		}
 
+		if o.isPVCThatShouldBeRestoredInHost(string(key)) {
+			value, err = unsetVolumeName(value, decoder, encoder)
+			if err != nil {
+				return fmt.Errorf("failed to unset volume name: %w", err)
+			}
+			klog.Infof("Unset volume name for PVC %s", strings.TrimPrefix(string(key), pvcPrefix))
+		}
+
 		// write the value to etcd
+		if o.skipKey(string(key)) {
+			klog.Infof("Skip key %s", string(key))
+			continue
+		}
+
 		klog.V(1).Infof("Restore key %s", string(key))
 		latestRevision, err = etcdClient.Put(ctx, string(key), value)
 		if err != nil {
@@ -165,6 +261,137 @@ func (o *RestoreClient) Run(ctx context.Context) (retErr error) {
 	return nil
 }
 
+func (o *RestoreClient) createRestoreRequest(ctx context.Context, vConfig *config.VirtualClusterConfig, value []byte) error {
+	klog.V(1).Infof("Found snapshot request object %s", string(value))
+	var err error
+	if vConfig.HostConfig == nil || vConfig.HostNamespace == "" {
+		// init the clients
+		vConfig.HostConfig, vConfig.HostNamespace, err = setupconfig.InitClientConfig()
+		if err != nil {
+			return fmt.Errorf("failed to init client config: %w", err)
+		}
+	}
+	if vConfig.HostClient == nil {
+		err = setupconfig.InitClients(vConfig)
+		if err != nil {
+			return fmt.Errorf("failed to init clients: %w", err)
+		}
+	}
+
+	var snapshotRequest Request
+	err = json.Unmarshal(value, &snapshotRequest)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal snapshot request: %w", err)
+	}
+	klog.Infof("Found snapshot request: %s", snapshotRequest.Name)
+	o.snapshotRequest = snapshotRequest
+
+	// first create the snapshot options Secret
+	secret, err := CreateSnapshotOptionsSecret(constants.RestoreRequestLabel, vConfig.HostNamespace, vConfig.Name, &o.Snapshot)
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot options Secret: %w", err)
+	}
+	secret.GenerateName = fmt.Sprintf("%s-restore-request-", vConfig.Name)
+	secret, err = vConfig.HostClient.CoreV1().Secrets(vConfig.HostNamespace).Create(ctx, secret, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot options Secret: %w", err)
+	}
+
+	// then create the restore request that will be reconciled by the controller
+	restoreRequest, err := NewRestoreRequest(snapshotRequest)
+	if err != nil {
+		return fmt.Errorf("failed to create restore request: %w", err)
+	}
+	restoreRequest.Name = secret.Name
+	configMap, err := CreateRestoreRequestConfigMap(vConfig.HostNamespace, vConfig.Name, restoreRequest)
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot request ConfigMap: %w", err)
+	}
+	configMap.Name = secret.Name
+	_, err = vConfig.HostClient.CoreV1().ConfigMaps(vConfig.HostNamespace).Create(ctx, configMap, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot request ConfigMap: %w", err)
+	}
+
+	klog.Infof("Created restore request: %s/%s", configMap.Namespace, configMap.Name)
+	return nil
+}
+
+func (o *RestoreClient) skipKey(key string) bool {
+	if !o.RestoreVolumes {
+		return false
+	}
+
+	if o.vConfig.PrivateNodes.Enabled {
+		// check if the snapshot exists
+		if strings.HasPrefix(key, pvcPrefix) {
+			pvcName := strings.TrimPrefix(key, pvcPrefix)
+			status, ok := o.snapshotRequest.Status.VolumeSnapshots.Snapshots[pvcName]
+			if !ok {
+				return false
+			}
+			// skip restoring PVC if it has a snapshot, restore controller will restore it
+			return status.Phase == volumes.RequestPhaseCompleted
+		} else if strings.HasPrefix(key, pvPrefix) {
+			volumeName := strings.TrimPrefix(key, pvPrefix)
+			for _, snapshotSpec := range o.snapshotRequest.Spec.VolumeSnapshots.Requests {
+				if snapshotSpec.PersistentVolumeClaim.Spec.VolumeName == volumeName {
+					return true
+				}
+			}
+		}
+	} else {
+		// In the shared mode, PVC restore is skipped for the ones where snapshots have failed.
+
+		// check if the snapshot exists
+		if strings.HasPrefix(key, pvcPrefix) {
+			pvcName := strings.TrimPrefix(key, pvcPrefix)
+
+			translatedPVCName := getTranslatedPVCName(pvcName)
+			if translatedPVCName == "" {
+				return true
+			}
+			status, ok := o.snapshotRequest.Status.VolumeSnapshots.Snapshots[translatedPVCName]
+			if !ok {
+				return false
+			}
+			// skip restoring PVC if it has a snapshot, restore controller will restore it
+			return status.Phase != volumes.RequestPhaseCompleted
+		}
+	}
+
+	return false
+}
+
+// isPVCThatShouldBeRestoredInHost checks if the key refers to a PVC that should be restored on the host cluster.
+func (o *RestoreClient) isPVCThatShouldBeRestoredInHost(key string) bool {
+	if !o.RestoreVolumes {
+		return false
+	}
+	if !strings.HasPrefix(key, pvcPrefix) {
+		// not PVC
+		return false
+	}
+	if o.vConfig.PrivateNodes.Enabled {
+		// restore in virtual, not in host
+		return false
+	}
+
+	pvcName := strings.TrimPrefix(key, pvcPrefix)
+	translatedPVCName := getTranslatedPVCName(pvcName)
+	if translatedPVCName == "" {
+		return true
+	}
+	status, ok := o.snapshotRequest.Status.VolumeSnapshots.Snapshots[translatedPVCName]
+	if !ok {
+		klog.V(1).Infof("Snapshot not found for PVC %s", strings.TrimPrefix(key, pvcPrefix))
+		return false
+	}
+	// skip restoring PVC if it has a snapshot, restore controller will restore it
+	klog.Infof("Snapshot found for PVC %s with phase %s", strings.TrimPrefix(key, pvcPrefix), status.Phase)
+	return status.Phase == volumes.RequestPhaseCompleted
+}
+
 func transformPod(value []byte, decoder runtime.Decoder, encoder runtime.Encoder) ([]byte, error) {
 	// decode value
 	obj := &corev1.Pod{}
@@ -178,6 +405,30 @@ func transformPod(value []byte, decoder runtime.Decoder, encoder runtime.Encoder
 	// make sure to delete nodename & status or otherwise vCluster will delete the pod on start
 	obj.Spec.NodeName = ""
 	obj.Status = corev1.PodStatus{}
+
+	// encode value
+	buf := &bytes.Buffer{}
+	err = encoder.Encode(obj, buf)
+	if err != nil {
+		return nil, fmt.Errorf("encode value: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func unsetVolumeName(value []byte, decoder runtime.Decoder, encoder runtime.Encoder) ([]byte, error) {
+	// decode value
+	obj := &corev1.PersistentVolumeClaim{}
+	_, _, err := decoder.Decode(value, &pvcGVK, obj)
+	if err != nil {
+		return nil, fmt.Errorf("decode value: %w", err)
+	} else if obj.DeletionTimestamp != nil {
+		klog.Infof("PVC deleted!")
+		return value, nil
+	}
+
+	// unset volume name
+	obj.Spec.VolumeName = ""
 
 	// encode value
 	buf := &bytes.Buffer{}
@@ -514,4 +765,16 @@ func readKeyValue(tarReader *tar.Reader) ([]byte, []byte, error) {
 	}
 
 	return []byte(header.Name), buf.Bytes(), nil
+}
+
+func getTranslatedPVCName(pvcName string) string {
+	// Parse namespace and name from "namespace/name" format
+	parts := strings.SplitN(pvcName, "/", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+
+	vNamespace, vName := parts[0], parts[1]
+	hostName := translate.Default.HostName(nil, vName, vNamespace)
+	return hostName.Namespace + "/" + hostName.Name
 }

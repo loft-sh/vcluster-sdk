@@ -109,8 +109,8 @@ type PrivateNodes struct {
 	// JoinNode holds configuration specifically used during joining the node (see "kubeadm join").
 	JoinNode JoinConfiguration `json:"joinNode,omitempty"`
 
-	// AutoNodes stores Auto Nodes configuration static and dynamic NodePools managed by Karpenter
-	AutoNodes PrivateNodesAutoNodes `json:"autoNodes,omitempty"`
+	// AutoNodes stores auto nodes configuration.
+	AutoNodes []PrivateNodesAutoNodes `json:"autoNodes,omitempty"`
 
 	// VPN holds configuration for the private nodes vpn. This can be used to connect the private nodes to the control plane or
 	// connect the private nodes to each other if they are not running in the same network. Platform connection is required for the vpn to work.
@@ -139,6 +139,13 @@ type PrivateNodesVPNNodeToNode struct {
 
 // PrivateNodesAutoNodes defines auto nodes
 type PrivateNodesAutoNodes struct {
+	// Provider is the node provider of the nodes in this pool.
+	Provider string `json:"provider,omitempty" jsonschema:"required"`
+
+	// Properties are the node provider properties. This is a simple key value map and can contain things
+	// like region, subscription, etc. that is then used by the node provider to create the nodes and node environment.
+	Properties map[string]string `json:"properties,omitempty"`
+
 	// Static defines static node pools. Static node pools have a fixed size and are not scaled automatically.
 	Static []StaticNodePool `json:"static,omitempty"`
 
@@ -151,12 +158,9 @@ type DynamicNodePool struct {
 	// Name is the name of this NodePool
 	Name string `json:"name" jsonschema:"required"`
 
-	// Provider is the node provider of the nodes in this pool.
-	Provider string `json:"provider,omitempty" jsonschema:"required"`
-
-	// Requirements filter the types of nodes that can be provisioned by this pool.
+	// NodeTypeSelector filters the types of nodes that can be provisioned by this pool.
 	// All requirements must be met for a node type to be eligible.
-	Requirements []Requirement `json:"requirements,omitempty"`
+	NodeTypeSelector []Requirement `json:"nodeTypeSelector,omitempty"`
 
 	// Taints are the taints to apply to the nodes in this pool.
 	Taints []KubeletJoinTaint `json:"taints,omitempty"`
@@ -232,12 +236,9 @@ type StaticNodePool struct {
 	// Name is the name of this static nodePool
 	Name string `json:"name" jsonschema:"required"`
 
-	// Provider is the node provider of the nodes in this pool.
-	Provider string `json:"provider,omitempty" jsonschema:"required"`
-
-	// Requirements filter the types of nodes that can be provisioned by this pool.
+	// NodeTypeSelector filters the types of nodes that can be provisioned by this pool.
 	// All requirements must be met for a node type to be eligible.
-	Requirements []Requirement `json:"requirements,omitempty"`
+	NodeTypeSelector []Requirement `json:"nodeTypeSelector,omitempty"`
 
 	// Taints are the taints to apply to the nodes in this pool.
 	Taints []KubeletJoinTaint `json:"taints,omitempty"`
@@ -365,9 +366,9 @@ type StandaloneAutoNodes struct {
 	// Quantity is the number of nodes to deploy for standalone mode.
 	Quantity int `json:"quantity,omitempty"`
 
-	// Requirements filter the types of nodes that can be provisioned by this pool.
+	// NodeTypeSelector filters the types of nodes that can be provisioned by this pool.
 	// All requirements must be met for a node type to be eligible.
-	Requirements []Requirement `json:"requirements,omitempty"`
+	NodeTypeSelector []Requirement `json:"nodeTypeSelector,omitempty"`
 }
 
 type StandaloneJoinNode struct {
@@ -678,6 +679,9 @@ type Integrations struct {
 
 	// Istio syncs DestinationRules, Gateways and VirtualServices from virtual cluster to the host.
 	Istio Istio `json:"istio,omitempty"`
+
+	// Netris integration helps configuring netris networking for vCluster.
+	Netris map[string]interface{} `json:"netris,omitempty"`
 }
 
 // CertManager reuses a host cert-manager and makes its CRDs from it available inside the vCluster
@@ -935,10 +939,13 @@ func ValidateChanges(oldCfg, newCfg *Config) error {
 	if err := ValidateStoreChanges(newCfg.BackingStoreType(), oldCfg.BackingStoreType()); err != nil {
 		return err
 	}
-
 	if err := ValidateNamespaceSyncChanges(oldCfg, newCfg); err != nil { //nolint:revive
 		return err
 	}
+	if err := ValidateVPNChanges(oldCfg, newCfg); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -996,6 +1003,18 @@ func ValidateNamespaceSyncChanges(oldCfg, newCfg *Config) error {
 
 	if !reflect.DeepEqual(oldNamespaceConf.Patches, newNamespaceConf.Patches) {
 		return fmt.Errorf("sync.toHost.namespaces.patches is not allowed to be changed")
+	}
+
+	return nil
+}
+
+func ValidateVPNChanges(oldCfg *Config, newCfg *Config) error {
+	if oldCfg.PrivateNodes.VPN.Enabled != newCfg.PrivateNodes.VPN.Enabled {
+		return fmt.Errorf("privateNodes.vpn.enabled is not allowed to be changed")
+	}
+
+	if oldCfg.PrivateNodes.VPN.NodeToNode.Enabled != newCfg.PrivateNodes.VPN.NodeToNode.Enabled {
+		return fmt.Errorf("privateNodes.vpn.nodeToNode.enabled is not allowed to be changed")
 	}
 
 	return nil
@@ -1184,6 +1203,9 @@ type SyncToHost struct {
 
 	// Endpoints defines if endpoints created within the virtual cluster should get synced to the host cluster.
 	Endpoints EnableSwitchWithPatches `json:"endpoints,omitempty"`
+
+	// EndpointSlices defines if endpointslices created within the virtual cluster should get synced to the host cluster.
+	EndpointSlices EnableSwitchWithPatches `json:"endpointSlices,omitempty"`
 
 	// NetworkPolicies defines if network policies created within the virtual cluster should get synced to the host cluster.
 	NetworkPolicies EnableSwitchWithPatches `json:"networkPolicies,omitempty"`
@@ -1765,6 +1787,18 @@ func (c ControlPlane) JSONSchemaExtend(base *jsonschema.Schema) {
 	addProToJSONSchema(base, reflect.TypeOf(c))
 }
 
+type KubeVip struct {
+	// Enabled defines if embedded kube-vip should be enabled.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Interface is the network interface on which the VIP is announced.
+	Interface string `json:"interface,omitempty"`
+
+	// Gateway is the gateway address in CIDR notation (e.g., 10.100.0.1/24).
+	// This is used to configure policy-based routing for the VIP and must include the subnet prefix.
+	Gateway string `json:"gateway,omitempty"`
+}
+
 type ControlPlaneStatefulSet struct {
 	// HighAvailability holds options related to high availability.
 	HighAvailability ControlPlaneHighAvailability `json:"highAvailability,omitempty"`
@@ -1817,6 +1851,12 @@ type ControlPlaneStatefulSet struct {
 
 	// Specifies the DNS parameters of a pod.
 	DNSConfig *PodDNSConfig `json:"dnsConfig,omitempty"`
+
+	// InitContainers are additional init containers for the statefulSet.
+	InitContainers []interface{} `json:"initContainers,omitempty"`
+
+	// SidecarContainers are additional sidecar containers for the statefulSet.
+	SidecarContainers []interface{} `json:"sidecarContainers,omitempty"`
 }
 
 type Distro struct {
@@ -2012,10 +2052,15 @@ type DatabaseKine struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// DataSource is the kine dataSource to use for the database. This depends on the database format.
-	// This is optional for the embedded database. Examples:
+	// This is optional for the external database. Examples:
 	// * mysql: mysql://username:password@tcp(hostname:3306)/k3s
 	// * postgres: postgres://username:password@hostname:5432/k3s
 	DataSource string `json:"dataSource,omitempty"`
+
+	// IdentityProvider is the kine identity provider to use when generating temporary authentication tokens for enhanced security.
+	// This is optional for the external database. Examples:
+	// * aws: RDS IAM Authentication
+	IdentityProvider string `json:"identityProvider,omitempty"`
 
 	// KeyFile is the key file to use for the database. This is optional.
 	KeyFile string `json:"keyFile,omitempty"`
@@ -2326,6 +2371,9 @@ type ControlPlaneAdvanced struct {
 
 	// GlobalMetadata is metadata that will be added to all resources deployed by Helm.
 	GlobalMetadata ControlPlaneGlobalMetadata `json:"globalMetadata,omitempty"`
+
+	// KubeVip holds configuration for embedded kube-vip that announces the virtual cluster endpoint IP on layer 2.
+	KubeVip KubeVip `json:"kubeVip,omitempty"`
 }
 
 type Registry struct {
@@ -2845,6 +2893,10 @@ type RBAC struct {
 
 	// ClusterRole holds virtual cluster cluster role configuration
 	ClusterRole RBACClusterRole `json:"clusterRole,omitempty"`
+
+	// EnableVolumeSnapshotRules enables all required volume snapshot rules in the Role and
+	// ClusterRole.
+	EnableVolumeSnapshotRules EnableAutoSwitch `json:"enableVolumeSnapshotRules,omitempty"`
 }
 
 type RBACClusterRole struct {
