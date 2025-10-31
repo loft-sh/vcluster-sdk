@@ -86,7 +86,7 @@ type LoftStarter struct {
 func (l *LoftStarter) Start(ctx context.Context) error {
 	// start in Docker?
 	if l.Docker {
-		return l.startDocker(ctx, "loft")
+		return l.startDocker(ctx, "vcluster-platform")
 	}
 
 	// only set local port by default in kubernetes installation
