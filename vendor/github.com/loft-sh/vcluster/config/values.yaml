@@ -283,9 +283,9 @@ controlPlane:
     pathType: ImplementationSpecific
     labels: {}
     annotations:
-      nginx.ingress.kubernetes.io/backend-protocol: HTTPS
-      nginx.ingress.kubernetes.io/ssl-passthrough: "true"
-      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/backend-protocol: HTTPS # ingress-nginx has been deprecated
+      nginx.ingress.kubernetes.io/ssl-passthrough: "true" # ingress-nginx has been deprecated
+      nginx.ingress.kubernetes.io/ssl-redirect: "true" # ingress-nginx has been deprecated
     spec:
       tls: []
 
@@ -438,6 +438,9 @@ controlPlane:
 
     globalMetadata:
       annotations: {}
+
+    podDisruptionBudget:
+      enabled: false
 
 privateNodes:
   enabled: false
@@ -616,11 +619,12 @@ policies:
     labels: {}
     annotations: {}
     fallbackDns: 8.8.8.8
-    extraControlPlaneRules: []
-    extraWorkloadRules: []
-    outgoingConnections:
-      platform: true
-      ipBlock:
+    controlPlane:
+      ingress: []
+      egress: []
+    workload:
+      publicEgress:
+        enabled: true
         cidr: 0.0.0.0/0
         except:
           - 100.64.0.0/10
@@ -628,6 +632,8 @@ policies:
           - 10.0.0.0/8
           - 172.16.0.0/12
           - 192.168.0.0/16
+      ingress: []
+      egress: []
 
   centralAdmission:
     validatingWebhooks: []
@@ -644,12 +650,23 @@ exportKubeConfig:
   secret:
     name: ""
     namespace: ""
+  additionalSecrets: []
 
 external: {}
 
 plugins: {}
 
 experimental:
+  docker:
+    loadBalancer:
+      enabled: true
+      forwardPorts: true
+    registryProxy:
+      enabled: true
+
+  proxy:
+    customResources: {}
+
   syncSettings:
     setOwner: true
 

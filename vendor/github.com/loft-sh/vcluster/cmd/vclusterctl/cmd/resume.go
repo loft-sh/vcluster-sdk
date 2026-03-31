@@ -52,7 +52,7 @@ vcluster resume test --namespace test
 		},
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver for the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver for the virtual cluster, can be either helm, platform, or docker.")
 
 	// Platform flags
 	cobraCmd.Flags().StringVar(&cmd.Project, "project", "", "[PLATFORM] The vCluster platform project to use")
@@ -72,6 +72,10 @@ func (cmd *ResumeCmd) Run(ctx context.Context, args []string) error {
 	// check if we should resume a platform backed virtual cluster
 	if driverType == config.PlatformDriver {
 		return cli.ResumePlatform(ctx, &cmd.ResumeOptions, cfg, args[0], cmd.Log)
+	}
+
+	if driverType == config.DockerDriver {
+		return cli.ResumeDocker(ctx, cmd.GlobalFlags, args[0], cmd.Log)
 	}
 
 	if err := cli.ResumeHelm(ctx, cmd.GlobalFlags, args[0], cmd.Log); err != nil {

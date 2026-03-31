@@ -65,7 +65,7 @@ vcluster connect test -n test -- kubectl get ns
 		return cmd.Run(cobraCmd.Context(), args)
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm, platform, or docker.")
 
 	connect.AddCommonFlags(cobraCmd, &cmd.ConnectOptions)
 	connect.AddPlatformFlags(cobraCmd, &cmd.ConnectOptions, "[PLATFORM] ")
@@ -110,6 +110,10 @@ func (cmd *ConnectCmd) Run(ctx context.Context, args []string) error {
 
 	if len(fs) > 0 {
 		cmd.Log.Fatalf("Following platform flags have been set, which won't have any effect when using driver type %s: %s", config.HelmDriver, strings.Join(fs, ", "))
+	}
+
+	if driverType == config.DockerDriver {
+		return cli.ConnectDocker(ctx, &cmd.ConnectOptions, cmd.GlobalFlags, vClusterName, args[1:], cmd.Log)
 	}
 
 	return cli.ConnectHelm(ctx, &cmd.ConnectOptions, cmd.GlobalFlags, vClusterName, args[1:], cmd.Log)

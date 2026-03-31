@@ -47,7 +47,7 @@ vcluster list --namespace test
 		},
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm, platform, or docker.")
 	cobraCmd.Flags().StringVar(&cmd.Output, "output", "table", "Choose the format of the output. [table|json]")
 
 	return cobraCmd
@@ -64,6 +64,9 @@ func (cmd *ListCmd) Run(cobraCmd *cobra.Command) error {
 	}
 	if driverType == config.PlatformDriver {
 		return cli.ListPlatform(cobraCmd.Context(), &cmd.ListOptions, cmd.GlobalFlags, cmd.log, "", false)
+	}
+	if driverType == config.DockerDriver {
+		return cli.ListDocker(cobraCmd.Context(), &cmd.ListOptions, cmd.GlobalFlags, cmd.log)
 	}
 
 	return cli.ListHelm(cobraCmd.Context(), &cmd.ListOptions, cmd.GlobalFlags, cmd.log)

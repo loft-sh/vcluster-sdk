@@ -51,7 +51,7 @@ vcluster delete test --namespace test
 		},
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm, platform, or docker.")
 
 	flagsdelete.AddCommonFlags(cobraCmd, &cmd.DeleteOptions)
 	flagsdelete.AddHelmFlags(cobraCmd, &cmd.DeleteOptions)
@@ -92,7 +92,11 @@ func (cmd *DeleteCmd) Run(cobraCmd *cobra.Command, args []string) error {
 	}
 
 	if len(fs) > 0 {
-		cmd.log.Fatalf("Following platform flags have been set, which won't have any effect when using driver type %s: %s", config.HelmDriver, strings.Join(fs, ", "))
+		cmd.log.Fatalf("Following platform flags have been set, which won't have any effect when using driver type %s: %s", driverType, strings.Join(fs, ", "))
+	}
+
+	if driverType == config.DockerDriver {
+		return cli.DeleteDocker(ctx, platformClient, &cmd.DeleteOptions, cmd.GlobalFlags, args[0], cmd.log)
 	}
 
 	return cli.DeleteHelm(ctx, platformClient, &cmd.DeleteOptions, cmd.GlobalFlags, args[0], cmd.log)
