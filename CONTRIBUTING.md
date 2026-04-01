@@ -42,7 +42,7 @@ We have a script to update the vCluster dependency and vCluster CLI versions in 
 Run following commands in each: `examples/bootstrap-with-deployment`, `examples/crd-sync`, `examples/hooks`:
 1. `go get github.com/loft-sh/vcluster@${VCLUSTER_VERSION}`
 2. Get the last commit SHA on main branch (one from the PR you just merged)
-3. Run `go get github.com/loft-sh/vcluster-sdk@{COMMIT_SHA}`
+3. Run `go get github.com/loft-sh/vcluster-sdk@${COMMIT_SHA}`
 4. Run `go mod tidy`
 5. Ensure that example compiles by building a docker image: `docker build . -t my-repo/my-plugin:0.0.1`
 6. If it fails to compile, you need to adjust the `*.go` files in the examples to the in the syncer interfaces in the vCluster targeted version
