@@ -624,8 +624,8 @@ func EnsureIngressController(ctx context.Context, kubeClient kubernetes.Interfac
 	)
 
 	answer, err := log.Question(&survey.QuestionOptions{
-		Question:     "Ingress controller required. Should the nginx-ingress controller be installed?",
-		DefaultValue: YesOption,
+		Question:     "[DEPRECATED]: Ingress controller required. Should the nginx-ingress controller be installed?",
+		DefaultValue: NoOption,
 		Options: []string{
 			YesOption,
 			NoOption,
@@ -731,7 +731,8 @@ func UpgradeLoft(ctx context.Context, kubeClient kubernetes.Interface, chartName
 	args = append(args, extraArgs...)
 
 	log.WriteString(logrus.InfoLevel, "\n")
-	log.Infof("Executing command: helm %s\n", strings.Join(args, " "))
+	log.Debugf("Executing command: helm %s\n", strings.Join(args, " "))
+	log.Infof("Starting vCluster platform...")
 	log.Info("Waiting for helm command, this can take up to several minutes...")
 	helmCmd := exec.Command("helm", args...)
 	if chartRepo != "" {

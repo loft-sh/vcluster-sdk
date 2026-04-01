@@ -139,6 +139,13 @@ func (l *LoftStarter) successDocker(ctx context.Context, containerID string) err
 		return fmt.Errorf(product.Replace("error waiting for loft: %v%w"), err)
 	}
 
+	if !l.NoLogin {
+		err := l.login(host)
+		if err != nil {
+			l.Log.Errorf("Error logging into platform automatically: %v", err)
+		}
+	}
+
 	// print success message
 	PrintSuccessMessageDockerInstall(host, l.Password, l.Log)
 	return nil
@@ -256,6 +263,12 @@ func (l *LoftStarter) runLoftInDocker(ctx context.Context, name string) (string,
 		args = append(args, "--env", "ADMIN_EMAIL="+l.Email)
 	}
 
+	// if we have LICENSE_TOKEN environment variable set, we use it to install the platform
+	if os.Getenv("LICENSE_TOKEN") != "" {
+		l.Log.Infof("Found LICENSE_TOKEN in environment, will use it to install the platform")
+		args = append(args, "--env", "LICENSE_TOKEN="+os.Getenv("LICENSE_TOKEN"))
+	}
+
 	// mount the vCluster platform lib
 	args = append(args, "-v", "vcluster-platform:/var/lib/loft")
 
@@ -276,7 +289,8 @@ func (l *LoftStarter) runLoftInDocker(ctx context.Context, name string) (string,
 		args = append(args, "ghcr.io/loft-sh/vcluster-platform:latest")
 	}
 
-	l.Log.Infof("Start vCluster platform via 'docker %s'", strings.Join(args, " "))
+	l.Log.Debugf("Start vCluster platform via 'docker %s'", strings.Join(args, " "))
+	l.Log.Infof("Starting vCluster platform...")
 	runCmd := l.buildDockerCmd(ctx, args...)
 	runCmd.Stdout = os.Stdout
 	runCmd.Stderr = os.Stderr

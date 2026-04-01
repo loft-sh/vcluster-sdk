@@ -11,10 +11,12 @@ import (
 	"strings"
 
 	"github.com/ghodss/yaml"
+	"github.com/samber/lo"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/loft-sh/vcluster/config"
 	cliconfig "github.com/loft-sh/vcluster/pkg/cli/config"
@@ -81,6 +83,14 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 		vConfig.Sync.ToHost.CustomResources,
 		vConfig.Sync.FromHost.CustomResources,
 		vConfig.Integrations); err != nil {
+		return err
+	}
+
+	// validate custom resources are not configured for both sync and proxy
+	if err := ValidateCustomResourceSyncProxyConflicts(
+		vConfig.Sync.ToHost.CustomResources,
+		vConfig.Sync.FromHost.CustomResources,
+		vConfig.Experimental.Proxy.CustomResources); err != nil {
 		return err
 	}
 
@@ -179,6 +189,11 @@ func ValidateConfigAndSetDefaults(vConfig *VirtualClusterConfig) error {
 	// set service name
 	if vConfig.ControlPlane.Advanced.WorkloadServiceAccount.Name == "" {
 		vConfig.ControlPlane.Advanced.WorkloadServiceAccount.Name = "vc-workload-" + vConfig.Name
+	}
+
+	err = validateAdvancedControlPlaneConfig(vConfig.ControlPlane.Advanced)
+	if err != nil {
+		return err
 	}
 
 	// check config for exporting kubeconfig Secrets
@@ -870,6 +885,79 @@ func validateRequirements(requirements []config.Requirement) error {
 			if requirement.Value == "" && len(requirement.Values) == 0 {
 				return fmt.Errorf("value or values is required for operator %s", requirement.Operator)
 			}
+		}
+	}
+
+	return nil
+}
+
+func validateAdvancedControlPlaneConfig(controlPlaneAdvanced config.ControlPlaneAdvanced) error {
+	if controlPlaneAdvanced.PodDisruptionBudget.Enabled &&
+		controlPlaneAdvanced.PodDisruptionBudget.MaxUnavailable != nil &&
+		controlPlaneAdvanced.PodDisruptionBudget.MinAvailable != nil {
+		return fmt.Errorf("minAvailable and maxUnavailable cannot be used together in a podDisruptionBudget")
+	}
+
+	return nil
+}
+
+func ValidateCustomResourceSyncProxyConflicts(toHostCustomResources map[string]config.SyncToHostCustomResource, fromHostCustomResources map[string]config.SyncFromHostCustomResource, proxyCustomResources map[string]config.CustomResourceProxy) error {
+	// Only consider enabled resources for conflict detection
+	enabledToHost := lo.Keys(lo.PickBy(toHostCustomResources, func(_ string, v config.SyncToHostCustomResource) bool { return v.Enabled }))
+	enabledFromHost := lo.Keys(lo.PickBy(fromHostCustomResources, func(_ string, v config.SyncFromHostCustomResource) bool { return v.Enabled }))
+	enabledProxy := lo.Keys(lo.PickBy(proxyCustomResources, func(_ string, v config.CustomResourceProxy) bool { return v.Enabled }))
+
+	// Check exact key conflicts between toHost and fromHost
+	if k := lo.Intersect(enabledToHost, enabledFromHost); len(k) > 0 {
+		return fmt.Errorf("custom resource %s exists in sync.toHost.customResources and sync.fromHost.customResources. Syncing is only supported one way", k[0])
+	}
+
+	proxyGroups := lo.SliceToMap(enabledProxy, func(key string) (string, string) {
+		return extractGroup(key), key
+	})
+	toHostGroups := lo.SliceToMap(enabledToHost, func(key string) (string, string) {
+		return extractGroup(key), key
+	})
+	fromHostGroups := lo.SliceToMap(enabledFromHost, func(key string) (string, string) {
+		return extractGroup(key), key
+	})
+
+	// Check toHost groups against proxy groups
+	if conflicting := lo.Intersect(lo.Keys(toHostGroups), lo.Keys(proxyGroups)); len(conflicting) > 0 {
+		group := conflicting[0]
+		return fmt.Errorf("custom resource group %q is used in both sync.toHost.customResources (%s) and proxy.customResources (%s). Resources from the same group cannot be used in both sync and proxy", group, toHostGroups[group], proxyGroups[group])
+	}
+
+	// Check fromHost groups against proxy groups
+	if conflicting := lo.Intersect(lo.Keys(fromHostGroups), lo.Keys(proxyGroups)); len(conflicting) > 0 {
+		group := conflicting[0]
+		return fmt.Errorf("custom resource group %q is used in both sync.fromHost.customResources (%s) and proxy.customResources (%s). Resources from the same group cannot be used in both sync and proxy", group, fromHostGroups[group], proxyGroups[group])
+	}
+
+	return nil
+}
+
+func extractGroup(key string) string {
+	// Split by "/" to separate version if present, then parse resource.group
+	parts := strings.SplitN(key, "/", 2)
+	gr := schema.ParseGroupResource(parts[0])
+	return gr.Group
+}
+
+func ValidateExperimentalProxyCustomResourcesConfig(cfg map[string]config.CustomResourceProxy) error {
+	for resourcePath, resourceConfig := range cfg {
+		basePath := fmt.Sprintf("experimental.proxy.customResources['%s']", resourcePath)
+
+		parts := strings.Split(resourcePath, "/")
+		if len(parts) != 2 || schema.ParseGroupResource(parts[0]).Resource == "" {
+			return fmt.Errorf("%s: invalid resource path %q, expected format 'resource.group/version' (e.g., 'resource.my-org.com/v1')", basePath, resourcePath)
+		}
+		if resourceConfig.TargetVirtualCluster.Name == "" {
+			return fmt.Errorf("%s.targetVirtualCluster is required", basePath)
+		}
+
+		if resourceConfig.AccessResources != "" && resourceConfig.AccessResources != config.AccessResourcesModeOwned && resourceConfig.AccessResources != config.AccessResourcesModeAll {
+			return fmt.Errorf("%s.accessResources: invalid value %q, must be 'owned' or 'all'", basePath, resourceConfig.AccessResources)
 		}
 	}
 

@@ -56,7 +56,7 @@ vcluster pause test --namespace test
 		},
 	}
 
-	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver for the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&cmd.Driver, "driver", "", "The driver for the virtual cluster, can be either helm, platform, or docker.")
 
 	// Platform flags
 	cobraCmd.Flags().StringVar(&cmd.Project, "project", "", "[PLATFORM] The vCluster platform project to use")
@@ -78,6 +78,10 @@ func (cmd *PauseCmd) Run(ctx context.Context, args []string) error {
 	// check if we should create a platform vCluster
 	if driverType == config.PlatformDriver {
 		return cli.PausePlatform(ctx, &cmd.PauseOptions, cfg, args[0], cmd.Log)
+	}
+
+	if driverType == config.DockerDriver {
+		return cli.PauseDocker(ctx, cmd.GlobalFlags, args[0], cmd.Log)
 	}
 
 	return cli.PauseHelm(ctx, cmd.GlobalFlags, args[0], cmd.Log)

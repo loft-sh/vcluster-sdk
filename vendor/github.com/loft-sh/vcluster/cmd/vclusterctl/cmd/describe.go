@@ -53,7 +53,7 @@ vcluster describe -o json test
 	}
 	p, _ := defaults.Get(pdefaults.KeyProject, "")
 
-	cobraCmd.Flags().StringVar(&driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm or platform.")
+	cobraCmd.Flags().StringVar(&driver, "driver", "", "The driver to use for managing the virtual cluster, can be either helm, platform, or docker.")
 	cobraCmd.Flags().StringVarP(&cmd.output, "output", "o", "", "The format to use to display the information, can either be json or yaml")
 	cobraCmd.Flags().StringVarP(&cmd.project, "project", "p", p, "The project to use")
 	cobraCmd.Flags().BoolVar(&cmd.configOnly, "config-only", false, "Return only the vcluster.yaml configuration")
@@ -82,6 +82,9 @@ func (cmd *DescribeCmd) Run(cobraCmd *cobra.Command, driver, name string) error 
 	}
 	if driverType == config.PlatformDriver {
 		return cli.DescribePlatform(cobraCmd.Context(), cmd.GlobalFlags, os.Stdout, cmd.log, name, cmd.project, cmd.configOnly, cmd.output)
+	}
+	if driverType == config.DockerDriver {
+		return cli.DescribeDocker(cobraCmd.Context(), cmd.GlobalFlags, os.Stdout, cmd.log, name, cmd.configOnly, cmd.output)
 	}
 
 	return cli.DescribeHelm(cobraCmd.Context(), cmd.GlobalFlags, os.Stdout, cmd.log, name, cmd.configOnly, cmd.output)
