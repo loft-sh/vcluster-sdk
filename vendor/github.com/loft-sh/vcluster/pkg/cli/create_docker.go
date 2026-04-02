@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	managementv1 "github.com/loft-sh/api/v4/pkg/apis/management/v1"
 	"github.com/loft-sh/log"
 	"github.com/loft-sh/log/hash"
 	"github.com/loft-sh/vcluster/config"
@@ -188,7 +189,7 @@ func CreateDocker(ctx context.Context, options *CreateOptions, globalFlags *flag
 			return err
 		}
 
-		platformArgs, err := addVClusterDocker(ctx, vClusterName, vConfig, options, globalFlags, vClusterJoinToken, log)
+		platformArgs, err := addVClusterDocker(ctx, vClusterName, vConfig, options, globalFlags, vClusterJoinToken, userValues, log)
 		if err != nil {
 			return err
 		}
@@ -215,7 +216,7 @@ func CreateDocker(ctx context.Context, options *CreateOptions, globalFlags *flag
 
 	// install vCluster standalone
 	if !exists {
-		err = installVClusterStandalone(ctx, vClusterName, vClusterVersion, extraVClusterArgs, log)
+		err = installVClusterStandalone(ctx, vClusterName, vClusterVersion, vConfig, extraVClusterArgs, log)
 		if err != nil {
 			return err
 		}
@@ -269,7 +270,7 @@ func writeVClusterYAML(globalFlags *flags.GlobalFlags, vClusterName string, fina
 	return filepath.Dir(vClusterYAMLPath), nil
 }
 
-func addVClusterDocker(ctx context.Context, name string, vClusterConfig *config.Config, options *CreateOptions, globalFlags *flags.GlobalFlags, joinToken string, log log.Logger) ([]string, error) {
+func addVClusterDocker(ctx context.Context, name string, vClusterConfig *config.Config, options *CreateOptions, globalFlags *flags.GlobalFlags, joinToken string, userValues string, log log.Logger) ([]string, error) {
 	platformConfig := vClusterConfig.GetPlatformConfig()
 	if platformConfig.APIKey.SecretName != "" || platformConfig.APIKey.Namespace != "" {
 		return nil, nil
@@ -307,7 +308,11 @@ func addVClusterDocker(ctx context.Context, name string, vClusterConfig *config.
 	}
 
 	// try with the regular name first
-	created, accessKey, createdName, err := platform.CreateWithName(ctx, managementClient, project, name, extraLabels)
+	created, accessKey, createdName, err := platform.CreateWithName(ctx, managementClient, project, name, extraLabels, func(vci *managementv1.VirtualClusterInstance) {
+		vci.Spec.Template.VirtualClusterCommonSpec.HelmRelease.Chart.Version = options.ChartVersion
+		vci.Spec.Template.VirtualClusterCommonSpec.HelmRelease.Values = userValues
+		vci.Spec.Standalone = true
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating platform access key: %w. If you don't want to use the platform, run this command with --add=false or run 'vcluster logout'", err)
 	} else if !created {
@@ -396,18 +401,43 @@ func runDockerCommand(ctx context.Context, args []string, streamDelay time.Durat
 	return allOutput, nil
 }
 
-func installVClusterStandalone(ctx context.Context, vClusterName, vClusterVersion string, extraArgs []string, log log.Logger) error {
+func installVClusterStandalone(ctx context.Context, vClusterName, vClusterVersion string, vClusterConfig *config.Config, extraArgs []string, log log.Logger) error {
 	log.Infof("Starting vCluster standalone %s", vClusterName)
 	containerName := getControlPlaneContainerName(vClusterName)
 	joinedArgs := strings.Join(extraArgs, " ")
 	args := []string{
 		"exec", containerName,
-		"bash", "-c", fmt.Sprintf(`set -e -o pipefail; curl -sfLk "https://github.com/loft-sh/vcluster/releases/download/v%s/install-standalone.sh" | sh -s -- --skip-download --skip-wait %s`, vClusterVersion, joinedArgs),
+		"bash", "-c", fmt.Sprintf(`set -e -o pipefail; for i in $(seq 1 120); do state=$(systemctl is-system-running 2>/dev/null || true); [ "$state" = "running" ] || [ "$state" = "degraded" ] && break; sleep 0.5; done; curl -sfLk "https://github.com/loft-sh/vcluster/releases/download/v%s/install-standalone.sh" | sh -s -- --skip-download --skip-wait %s`, vClusterVersion, joinedArgs),
 	}
 
 	out, err := runDockerCommand(ctx, args, 2*time.Minute, log)
 	if err != nil {
 		return fmt.Errorf("failed to start vCluster standalone: %w: %s", err, out)
+	}
+
+	// wait for the vCluster standalone node to be joined
+	if vClusterConfig.ControlPlane.Standalone.JoinNode.Enabled {
+		log.Infof("Waiting for vCluster standalone node to be joined...")
+
+		timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+
+		args := []string{
+			"exec", containerName,
+			"bash", "-c", `while true; do count=$(kubectl get nodes --request-timeout=10s --no-headers 2>/dev/null | wc -l); [ "$count" -ge 1 ] && exit 0; sleep 0.5; done`,
+		}
+
+		_, err := exec.CommandContext(timeoutCtx, "docker", args...).CombinedOutput()
+		if err != nil {
+			kubeletLogs := getKubeletLogs(ctx, vClusterName)
+			if kubeletLogs != "" {
+				kubeletLogs = "\nKubelet logs:\n" + kubeletLogs
+			}
+
+			return fmt.Errorf("failed to start vCluster standalone. Node couldn't join: %w:\nvCluster logs:\n%s%s", err, getVClusterLogs(ctx, vClusterName), kubeletLogs)
+		}
+
+		log.Donef("vCluster standalone node joined successfully")
 	}
 
 	return nil
