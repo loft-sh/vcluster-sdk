@@ -14,19 +14,19 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  workflows: write
-
-env:
-  VCLUSTER_VERSION: ${{ inputs.vcluster_version || 'v0.34.0' }}
 
 jobs:
   bump-sdk:
     name: Bump SDK dependency
     runs-on: ubuntu-latest
+    env:
+      VCLUSTER_VERSION: ${{ inputs.vcluster_version || 'v0.34.0' }}
     outputs:
       pr_number: ${{ steps.open-pr.outputs.pr_number }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.WORKFLOW_PAT }}
 
       - uses: actions/setup-go@v5
         with:
@@ -61,6 +61,8 @@ jobs:
     needs: bump-sdk
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      VCLUSTER_VERSION: ${{ inputs.vcluster_version || 'v0.34.0' }}
     steps:
       - name: Wait for PR1 to merge
         env:
@@ -94,7 +96,6 @@ jobs:
 
       - name: Update and verify examples
         env:
-          VCLUSTER_VERSION: ${{ env.VCLUSTER_VERSION }}
           GOPRIVATE: github.com/loft-sh/*
         run: |
           SDK_SHA=$(git rev-parse HEAD)
@@ -111,7 +112,6 @@ jobs:
       - name: Commit and open PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VCLUSTER_VERSION: ${{ env.VCLUSTER_VERSION }}
         run: |
           git checkout -b chore/update-examples-${VCLUSTER_VERSION}
           git add -A
