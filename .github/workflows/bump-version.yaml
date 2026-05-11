@@ -1,0 +1,123 @@
+name: Bump vCluster Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      vcluster_version:
+        description: 'Target vCluster version (e.g. v0.34.0)'
+        required: true
+  # TODO: remove before merging to main
+  push:
+    branches:
+      - ENGNODE-333-update-plugin-sdk-to-vcluster-v034
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-sdk:
+    name: Bump SDK dependency
+    runs-on: ubuntu-latest
+    env:
+      VCLUSTER_VERSION: ${{ inputs.vcluster_version || 'v0.34.0' }}
+    outputs:
+      pr_number: ${{ steps.open-pr.outputs.pr_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run bump script
+        run: go run ./hack/bump-vcluster-dep.go ${{ env.VCLUSTER_VERSION }}
+
+      - name: Commit and open PR
+        id: open-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout -b chore/bump-vcluster-dep-${{ env.VCLUSTER_VERSION }}
+          git add -A
+          git commit -m "chore: bump vCluster to ${{ env.VCLUSTER_VERSION }}"
+          git push origin HEAD
+          PR_URL=$(gh pr create \
+            --title "chore: bump vCluster to ${{ env.VCLUSTER_VERSION }}" \
+            --body "Automated dependency bump." \
+            --base main)
+          gh pr merge "$PR_URL" --auto --squash
+          echo "pr_number=$(echo $PR_URL | grep -oE '[0-9]+$')" >> $GITHUB_OUTPUT
+
+  update-examples:
+    name: Update examples
+    needs: bump-sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VCLUSTER_VERSION: ${{ inputs.vcluster_version || 'v0.34.0' }}
+    steps:
+      - name: Wait for PR1 to merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TIMEOUT=1800  # 30 minutes in seconds
+          ELAPSED=0
+          until [ "$(gh pr view ${{ needs.bump-sdk.outputs.pr_number }} \
+            --repo ${{ github.repository }} --json state -q .state)" = "MERGED" ]; do
+            if [ $ELAPSED -ge $TIMEOUT ]; then
+              echo "Timed out waiting for PR #${{ needs.bump-sdk.outputs.pr_number }} to merge."
+              exit 1
+            fi
+            echo "Waiting for PR #${{ needs.bump-sdk.outputs.pr_number }} to merge..."
+            sleep 30
+            ELAPSED=$((ELAPSED + 30))
+          done
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Update and verify examples
+        env:
+          GOPRIVATE: github.com/loft-sh/*
+        run: |
+          SDK_SHA=$(git rev-parse HEAD)
+          for dir in examples/bootstrap-with-deployment examples/crd-sync examples/hooks examples/import-secrets; do
+            echo "--- Updating $dir ---"
+            pushd $dir
+            go get github.com/loft-sh/vcluster@${VCLUSTER_VERSION}
+            go get github.com/loft-sh/vcluster-sdk@${SDK_SHA}
+            go mod tidy
+            docker build . -t vcluster-sdk-example-verify:latest
+            popd
+          done
+
+      - name: Commit and open PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout -b chore/update-examples-${VCLUSTER_VERSION}
+          git add -A
+          git commit -m "chore: update examples to vCluster ${VCLUSTER_VERSION}"
+          git push origin HEAD
+          gh pr create \
+            --title "chore: update examples to vCluster ${VCLUSTER_VERSION}" \
+            --body "Automated example update following SDK bump to ${VCLUSTER_VERSION}." \
+            --base main
