@@ -1,0 +1,101 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "baseBranchPatterns": ["main"],
+  "labels": ["dependencies"],
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 10,
+  "minimumReleaseAge": "3 days",
+  "schedule": ["before 6am on monday"],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  },
+  "postUpdateOptions": ["gomodTidy"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "vendor/**",
+    "examples/**"
+  ],
+  "packageRules": [
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Group Go patch updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "go-patch-updates"
+    },
+    {
+      "description": "Kubernetes Go modules move in lockstep",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["k8s.io/{/,}**", "sigs.k8s.io/{/,}**"],
+      "groupName": "k8s-go-deps"
+    },
+    {
+      "description": "Group loft-sh Go modules",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/loft-sh/{/,}**"],
+      "groupName": "loft-sh-go-deps"
+    },
+    {
+      "description": "vCluster bumps update go.mod and the e2e workflow pins together (mirrors hack/bump-vcluster-dep.go)",
+      "matchPackageNames": [
+        "github.com/loft-sh/vcluster",
+        "loft-sh/vcluster",
+        "ghcr.io/loft-sh/vcluster-pro"
+      ],
+      "groupName": "vcluster"
+    },
+    {
+      "description": "kind CLI and kindest/node image versions must match",
+      "matchPackageNames": ["kubernetes-sigs/kind", "kindest/node"],
+      "groupName": "kind"
+    },
+    {
+      "description": "Group the go directive with the golang build image",
+      "matchPackageNames": ["go", "golang"],
+      "groupName": "golang-version"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "vCluster CLI version in the e2e workflow env",
+      "managerFilePatterns": ["/^\\.github/workflows/e2e\\.yaml$/"],
+      "matchStrings": ["\\n  VCLUSTER_VERSION: (?<currentValue>v[\\d.]+)"],
+      "depNameTemplate": "loft-sh/vcluster",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "vCluster Pro background proxy image in the e2e workflow env",
+      "managerFilePatterns": ["/^\\.github/workflows/e2e\\.yaml$/"],
+      "matchStrings": ["\\n  VCLUSTER_BACKGROUND_PROXY_IMAGE: ghcr\\.io/loft-sh/vcluster-pro:(?<currentValue>[\\d.]+)"],
+      "depNameTemplate": "ghcr.io/loft-sh/vcluster-pro",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "kind version passed to engineerd/setup-kind in the e2e workflow",
+      "managerFilePatterns": ["/^\\.github/workflows/e2e\\.yaml$/"],
+      "matchStrings": ["uses: engineerd/setup-kind@\\S+\\s+with:\\s+version: \"(?<currentValue>v[\\d.]+)\""],
+      "depNameTemplate": "kubernetes-sigs/kind",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "kindest/node image for the e2e kind cluster",
+      "managerFilePatterns": ["/^\\.github/workflows/e2e\\.yaml$/"],
+      "matchStrings": ["image: (?<depName>kindest/node):(?<currentValue>v[\\d.]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"],
+      "datasourceTemplate": "docker"
+    }
+  ]
+}
