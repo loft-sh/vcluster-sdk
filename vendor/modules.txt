@@ -729,7 +729,7 @@ github.com/loft-sh/image/transports
 github.com/loft-sh/image/transports/alltransports
 github.com/loft-sh/image/types
 github.com/loft-sh/image/version
-# github.com/loft-sh/log v0.0.0-20240219160058-26d83ffb46ac
+# github.com/loft-sh/log v0.0.0-20260812120051-874a69680b18
 ## explicit; go 1.20
 github.com/loft-sh/log
 github.com/loft-sh/log/hash
