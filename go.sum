@@ -327,8 +327,8 @@ github.com/loft-sh/apiserver v0.0.0-20260113122925-594495a02e96 h1:MnvrgRnVm7X8z
 github.com/loft-sh/apiserver v0.0.0-20260113122925-594495a02e96/go.mod h1:yBY01KhmW2XAWoqbAx8rx3xqwVwGMa3OYwiM2eYalY4=
 github.com/loft-sh/image v0.0.0-20250625154753-87447a6ad364 h1:vSuqHqh4w2zrG+WvnyH64JAUhX+Bou19n0gvCrPirOs=
 github.com/loft-sh/image v0.0.0-20250625154753-87447a6ad364/go.mod h1:niVPRwWFUSA8FihY9e5hGAp5IbKmbCdckGxJGSTKTUs=
-github.com/loft-sh/log v0.0.0-20240219160058-26d83ffb46ac h1:Gz/7Lb7WgdgIv+KJz87ORA1zvQW52tUqKPGyunlp4dQ=
-github.com/loft-sh/log v0.0.0-20240219160058-26d83ffb46ac/go.mod h1:YImeRjXH34Yf5E79T7UHBQpDZl9fIaaFRgyZ/bkY+UQ=
+github.com/loft-sh/log v0.0.0-20260812120051-874a69680b18 h1:sbARcX5vFUv8E/x6q6ZWPprmWFIWnh4MAn8JWZhr8fQ=
+github.com/loft-sh/log v0.0.0-20260812120051-874a69680b18/go.mod h1:YImeRjXH34Yf5E79T7UHBQpDZl9fIaaFRgyZ/bkY+UQ=
 github.com/loft-sh/utils v0.0.29 h1:P/MObccXToAZy2QoJSQDJ+OJx1qHitpFHEVj3QBSNJs=
 github.com/loft-sh/utils v0.0.29/go.mod h1:9hlX9cGpWHg3mNi/oBlv3X4ePGDMK66k8MbOZGFMDTI=
 github.com/loft-sh/vcluster v0.33.1 h1:EI7fBxdeGutu9QZSkzqaUIJ7LEWZalLlwGXWBMJCGtk=

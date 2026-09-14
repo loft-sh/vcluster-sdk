@@ -56,6 +56,7 @@ package zapr
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/go-logr/logr"
 	"go.uber.org/zap"
@@ -96,6 +97,9 @@ type zapLogger struct {
 	// It is used to determine whether a log message is
 	// actually logged.
 	verbosityLevel int
+
+	// regexs to discard
+	regexs []*regexp.Regexp
 }
 
 const (
@@ -218,6 +222,13 @@ func (zl zapLogger) Enabled(lvl int) bool {
 }
 
 func (zl *zapLogger) Info(lvl int, msg string, keysAndVals ...interface{}) {
+	for _, re := range zl.regexs {
+		if re.MatchString(msg) {
+			// discard
+			return
+		}
+	}
+
 	if checkedEntry := zl.l.Check(toZapLevel(lvl, zl.verbosityLevel), msg); checkedEntry != nil {
 		checkedEntry.Write(zl.handleFields(lvl, keysAndVals)...)
 	}
@@ -331,6 +342,19 @@ func AllowZapFields(allowed bool) Option {
 func DPanicOnBugs(enabled bool) Option {
 	return func(zl *zapLogger) {
 		zl.panicMessages = enabled
+	}
+}
+
+// DiscardLogMessagesMatching allows you to set filtering for log messages.
+// Any log message that is matching one of the Regexp passed to this function will be discarded in INFO.
+func DiscardLogMessagesMatching(regexs []*regexp.Regexp) Option {
+	return func(zl *zapLogger) {
+		if len(zl.regexs) == 0 {
+			zl.regexs = regexs[:]
+		} else {
+			zl.regexs = append(zl.regexs, regexs...)
+		}
+
 	}
 }
 

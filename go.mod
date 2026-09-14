@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/ghodss/yaml v1.0.0
 	github.com/hashicorp/go-plugin v1.6.0
-	github.com/loft-sh/log v0.0.0-20240219160058-26d83ffb46ac
+	github.com/loft-sh/log v0.0.0-20260812120051-874a69680b18
 	github.com/loft-sh/vcluster v0.33.1
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
