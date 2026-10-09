@@ -15,4 +15,4 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: loft-sh/github-actions/.github/workflows/validate-renovate.yaml@b52efbd927586ea78282073f79d2423e552c9f62 # validate-renovate/v1
+    uses: loft-sh/github-actions/.github/workflows/validate-renovate.yaml@c6a76f19cc302d63d1631853496bce5bf76a4e0a # validate-renovate/v1
