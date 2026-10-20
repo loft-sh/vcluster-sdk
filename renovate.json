@@ -72,7 +72,8 @@
       "matchPackageNames": [
         "loft-sh/**"
       ],
-      "pinDigests": false
+      "pinDigests": false,
+      "enabled": false
     }
   ],
   "customManagers": [
