@@ -63,6 +63,16 @@
       "description": "Group the go directive with the golang build image",
       "matchPackageNames": ["go", "golang"],
       "groupName": "golang-version"
+    },
+    {
+      "description": "Keep internal actions on rolling tags",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "loft-sh/**"
+      ],
+      "pinDigests": false
     }
   ],
   "customManagers": [
