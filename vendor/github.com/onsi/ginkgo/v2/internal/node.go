@@ -57,6 +57,7 @@ type Node struct {
 	MustPassRepeatedly           int
 	Labels                       Labels
 	SemVerConstraints            SemVerConstraints
+	ComponentSemVerConstraints   ComponentSemVerConstraints
 	PollProgressAfter            time.Duration
 	PollProgressInterval         time.Duration
 	NodeTimeout                  time.Duration
@@ -106,7 +107,24 @@ func (l Labels) MatchesLabelFilter(query string) bool {
 type SemVerConstraints []string
 
 func (svc SemVerConstraints) MatchesSemVerFilter(version string) bool {
-	return types.MustParseSemVerFilter(version)(svc)
+	return types.MustParseSemVerFilter(version)("", svc)
+}
+
+type ComponentSemVerConstraints map[string][]string
+
+func (csvc ComponentSemVerConstraints) MatchesSemVerFilter(component, version string) bool {
+	for comp, constraints := range csvc {
+		if comp != component {
+			continue
+		}
+
+		input := version
+		if len(component) > 0 {
+			input = fmt.Sprintf("%s=%s", component, version)
+		}
+		return types.MustParseSemVerFilter(input)(component, constraints)
+	}
+	return false
 }
 
 func unionOf[S ~[]E, E comparable](slices ...S) S {
@@ -129,6 +147,16 @@ func UnionOfLabels(labels ...Labels) Labels {
 
 func UnionOfSemVerConstraints(semVerConstraints ...SemVerConstraints) SemVerConstraints {
 	return unionOf(semVerConstraints...)
+}
+
+func UnionOfComponentSemVerConstraints(componentSemVerConstraintsSlice ...ComponentSemVerConstraints) ComponentSemVerConstraints {
+	unionComponentSemVerConstraints := ComponentSemVerConstraints{}
+	for _, componentSemVerConstraints := range componentSemVerConstraintsSlice {
+		for component, constraints := range componentSemVerConstraints {
+			unionComponentSemVerConstraints[component] = unionOf(unionComponentSemVerConstraints[component], constraints)
+		}
+	}
+	return unionComponentSemVerConstraints
 }
 
 func PartitionDecorations(args ...any) ([]any, []any) {
@@ -174,6 +202,8 @@ func isDecoration(arg any) bool {
 		return true
 	case t == reflect.TypeOf(SemVerConstraints{}):
 		return true
+	case t == reflect.TypeOf(ComponentSemVerConstraints{}):
+		return true
 	case t == reflect.TypeOf(PollProgressInterval(0)):
 		return true
 	case t == reflect.TypeOf(PollProgressAfter(0)):
@@ -214,16 +244,17 @@ var specContextType = reflect.TypeOf(new(SpecContext)).Elem()
 func NewNode(deprecationTracker *types.DeprecationTracker, nodeType types.NodeType, text string, args ...any) (Node, []error) {
 	baseOffset := 2
 	node := Node{
-		ID:                   UniqueNodeID(),
-		NodeType:             nodeType,
-		Text:                 text,
-		Labels:               Labels{},
-		SemVerConstraints:    SemVerConstraints{},
-		CodeLocation:         types.NewCodeLocation(baseOffset),
-		NestingLevel:         -1,
-		PollProgressAfter:    -1,
-		PollProgressInterval: -1,
-		GracePeriod:          -1,
+		ID:                         UniqueNodeID(),
+		NodeType:                   nodeType,
+		Text:                       text,
+		Labels:                     Labels{},
+		SemVerConstraints:          SemVerConstraints{},
+		ComponentSemVerConstraints: ComponentSemVerConstraints{},
+		CodeLocation:               types.NewCodeLocation(baseOffset),
+		NestingLevel:               -1,
+		PollProgressAfter:          -1,
+		PollProgressInterval:       -1,
+		GracePeriod:                -1,
 	}
 
 	errors := []error{}
@@ -358,6 +389,36 @@ func NewNode(deprecationTracker *types.DeprecationTracker, nodeType types.NodeTy
 					semVerConstraint, err := types.ValidateAndCleanupSemVerConstraint(semVerConstraint, node.CodeLocation)
 					node.SemVerConstraints = append(node.SemVerConstraints, semVerConstraint)
 					appendError(err)
+				}
+			}
+		case t == reflect.TypeOf(ComponentSemVerConstraints{}):
+			if !nodeType.Is(types.NodeTypesForContainerAndIt) {
+				appendError(types.GinkgoErrors.InvalidDecoratorForNodeType(node.CodeLocation, nodeType, "ComponentSemVerConstraint"))
+			}
+			for component, semVerConstraints := range arg.(ComponentSemVerConstraints) {
+				// while using ComponentSemVerConstraints, we should not allow empty component names.
+				// you should use SemVerConstraints for that.
+				hasErr := false
+				if len(component) == 0 {
+					appendError(types.GinkgoErrors.InvalidEmptyComponentForSemVerConstraint(node.CodeLocation))
+					hasErr = true
+				}
+				for _, semVerConstraint := range semVerConstraints {
+					_, err := types.ValidateAndCleanupSemVerConstraint(semVerConstraint, node.CodeLocation)
+					if err != nil {
+						appendError(err)
+						hasErr = true
+					}
+				}
+
+				if !hasErr {
+					// merge constraints if the component already exists
+					constraints := slices.Clone(semVerConstraints)
+					if existingConstraints, exists := node.ComponentSemVerConstraints[component]; exists {
+						constraints = UnionOfSemVerConstraints([]string(existingConstraints), constraints)
+					}
+
+					node.ComponentSemVerConstraints[component] = slices.Clone(constraints)
 				}
 			}
 		case t.Kind() == reflect.Func:
@@ -586,8 +647,22 @@ func extractSynchronizedBeforeSuiteAllProcsBody(arg any) (func(SpecContext, []by
 var errInterface = reflect.TypeOf((*error)(nil)).Elem()
 
 func NewCleanupNode(deprecationTracker *types.DeprecationTracker, fail func(string, types.CodeLocation), args ...any) (Node, []error) {
+	return newDeferredNode(deprecationTracker, fail, types.NodeTypeCleanupInvalid, "DeferCleanup", types.GinkgoErrors.DeferCleanupInvalidFunction, args...)
+}
+
+/*
+NewOnFailureNode constructs the node registered by DeferOnFailure.  DeferOnFailure accepts exactly what DeferCleanup accepts.
+Like a cleanup node it is generated dynamically during the run phase - the suite assigns its final node type (and therefore
+its scope) when it is pushed, based on the node that registered it.
+*/
+func NewOnFailureNode(deprecationTracker *types.DeprecationTracker, fail func(string, types.CodeLocation), args ...any) (Node, []error) {
+	return newDeferredNode(deprecationTracker, fail, types.NodeTypeOnFailureInvalid, "DeferOnFailure", types.GinkgoErrors.DeferOnFailureInvalidFunction, args...)
+}
+
+// newDeferredNode implements the shared argument handling of DeferCleanup and DeferOnFailure
+func newDeferredNode(deprecationTracker *types.DeprecationTracker, fail func(string, types.CodeLocation), nodeType types.NodeType, name string, invalidFunctionError func(types.CodeLocation) error, args ...any) (Node, []error) {
 	decorations, remainingArgs := PartitionDecorations(args...)
-	baseOffset := 2
+	baseOffset := 3 // newDeferredNode -> NewCleanupNode/NewOnFailureNode -> DeferCleanup/DeferOnFailure -> user code
 	cl := types.NewCodeLocation(baseOffset)
 	finalArgs := []any{}
 	for _, arg := range decorations {
@@ -603,12 +678,12 @@ func NewCleanupNode(deprecationTracker *types.DeprecationTracker, fail func(stri
 	finalArgs = append(finalArgs, cl)
 
 	if len(remainingArgs) == 0 {
-		return Node{}, []error{types.GinkgoErrors.DeferCleanupInvalidFunction(cl)}
+		return Node{}, []error{invalidFunctionError(cl)}
 	}
 
 	callback := reflect.ValueOf(remainingArgs[0])
 	if !(callback.Kind() == reflect.Func) {
-		return Node{}, []error{types.GinkgoErrors.DeferCleanupInvalidFunction(cl)}
+		return Node{}, []error{invalidFunctionError(cl)}
 	}
 
 	callArgs := []reflect.Value{}
@@ -632,7 +707,7 @@ func NewCleanupNode(deprecationTracker *types.DeprecationTracker, fail func(stri
 		}
 		last := out[len(out)-1]
 		if last.Type().Implements(errInterface) && !last.IsNil() {
-			fail(fmt.Sprintf("DeferCleanup callback returned error: %v", last), cl)
+			fail(fmt.Sprintf("%s callback returned error: %v", name, last), cl)
 		}
 	}
 
@@ -648,7 +723,7 @@ func NewCleanupNode(deprecationTracker *types.DeprecationTracker, fail func(stri
 		})
 	}
 
-	return NewNode(deprecationTracker, types.NodeTypeCleanupInvalid, "", finalArgs)
+	return NewNode(deprecationTracker, nodeType, "", finalArgs)
 }
 
 func (n Node) IsZero() bool {
@@ -893,6 +968,34 @@ func (n Nodes) UnionOfSemVerConstraints() []string {
 			if !seen[constraint] {
 				seen[constraint] = true
 				out = append(out, constraint)
+			}
+		}
+	}
+	return out
+}
+
+func (n Nodes) ComponentSemVerConstraints() []map[string][]string {
+	out := make([]map[string][]string, len(n))
+	for i := range n {
+		if n[i].ComponentSemVerConstraints == nil {
+			out[i] = map[string][]string{}
+		} else {
+			out[i] = map[string][]string(n[i].ComponentSemVerConstraints)
+		}
+	}
+	return out
+}
+
+func (n Nodes) UnionOfComponentSemVerConstraints() map[string][]string {
+	out := map[string][]string{}
+	seen := map[string]bool{}
+	for i := range n {
+		for component := range n[i].ComponentSemVerConstraints {
+			if !seen[component] {
+				seen[component] = true
+				out[component] = n[i].ComponentSemVerConstraints[component]
+			} else {
+				out[component] = UnionOfSemVerConstraints(out[component], n[i].ComponentSemVerConstraints[component])
 			}
 		}
 	}
